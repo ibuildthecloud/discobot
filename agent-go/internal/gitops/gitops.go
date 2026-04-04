@@ -66,6 +66,8 @@ type commitFileChange struct {
 	OldPath         string `json:"oldPath,omitempty"`
 	Status          string `json:"status"`
 	Binary          bool   `json:"binary,omitempty"`
+	PreviousMode    string `json:"previousMode,omitempty"`
+	Mode            string `json:"mode,omitempty"`
 	PreviousContent []byte `json:"previousContent,omitempty"`
 	Content         []byte `json:"content,omitempty"`
 }
@@ -500,7 +502,15 @@ func buildCommitReplayEntry(workspaceRoot, parent, sha string) (commitReplayEntr
 			if err != nil {
 				return commitReplayEntry{}, err
 			}
-			entry.Changes = append(entry.Changes, commitFileChange{Path: newPath, OldPath: oldPath, Status: "renamed", PreviousContent: oldContent, Content: newContent})
+			oldMode, err := gitPathMode(workspaceRoot, parent, oldPath)
+			if err != nil {
+				return commitReplayEntry{}, err
+			}
+			newMode, err := gitPathMode(workspaceRoot, sha, newPath)
+			if err != nil {
+				return commitReplayEntry{}, err
+			}
+			entry.Changes = append(entry.Changes, commitFileChange{Path: newPath, OldPath: oldPath, Status: "renamed", PreviousMode: oldMode, Mode: newMode, PreviousContent: oldContent, Content: newContent})
 		case statusToken == "A":
 			path := tokens[i]
 			i++
@@ -508,7 +518,11 @@ func buildCommitReplayEntry(workspaceRoot, parent, sha string) (commitReplayEntr
 			if err != nil {
 				return commitReplayEntry{}, err
 			}
-			entry.Changes = append(entry.Changes, commitFileChange{Path: path, Status: "added", Content: content})
+			mode, err := gitPathMode(workspaceRoot, sha, path)
+			if err != nil {
+				return commitReplayEntry{}, err
+			}
+			entry.Changes = append(entry.Changes, commitFileChange{Path: path, Status: "added", Mode: mode, Content: content})
 		case statusToken == "M":
 			path := tokens[i]
 			i++
@@ -520,7 +534,15 @@ func buildCommitReplayEntry(workspaceRoot, parent, sha string) (commitReplayEntr
 			if err != nil {
 				return commitReplayEntry{}, err
 			}
-			entry.Changes = append(entry.Changes, commitFileChange{Path: path, Status: "modified", PreviousContent: previousContent, Content: content})
+			previousMode, err := gitPathMode(workspaceRoot, parent, path)
+			if err != nil {
+				return commitReplayEntry{}, err
+			}
+			mode, err := gitPathMode(workspaceRoot, sha, path)
+			if err != nil {
+				return commitReplayEntry{}, err
+			}
+			entry.Changes = append(entry.Changes, commitFileChange{Path: path, Status: "modified", PreviousMode: previousMode, Mode: mode, PreviousContent: previousContent, Content: content})
 		case statusToken == "D":
 			path := tokens[i]
 			i++
@@ -528,7 +550,11 @@ func buildCommitReplayEntry(workspaceRoot, parent, sha string) (commitReplayEntr
 			if err != nil {
 				return commitReplayEntry{}, err
 			}
-			entry.Changes = append(entry.Changes, commitFileChange{Path: path, Status: "deleted", PreviousContent: previousContent})
+			previousMode, err := gitPathMode(workspaceRoot, parent, path)
+			if err != nil {
+				return commitReplayEntry{}, err
+			}
+			entry.Changes = append(entry.Changes, commitFileChange{Path: path, Status: "deleted", PreviousMode: previousMode, PreviousContent: previousContent})
 		default:
 			return commitReplayEntry{}, fmt.Errorf("unsupported change type %q", statusToken)
 		}
@@ -546,4 +572,16 @@ func splitNullTokens(data []byte) []string {
 		}
 	}
 	return filtered
+}
+
+func gitPathMode(workspaceRoot, ref, path string) (string, error) {
+	output, err := gitCmd(workspaceRoot, "ls-tree", ref, "--", path)
+	if err != nil {
+		return "", err
+	}
+	fields := strings.Fields(output)
+	if len(fields) == 0 {
+		return "", fmt.Errorf("path %s not found at %s", path, ref)
+	}
+	return fields[0], nil
 }

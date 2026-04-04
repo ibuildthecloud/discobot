@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -1422,6 +1423,7 @@ type replayState struct {
 type replayFileState struct {
 	exists  bool
 	content []byte
+	mode    string
 	loaded  bool
 }
 
@@ -1443,7 +1445,11 @@ func (s *replayState) read(path string) (*replayFileState, error) {
 		}
 		return nil, err
 	}
-	state := &replayFileState{exists: true, content: append([]byte(nil), data...), loaded: true}
+	mode, err := fileModeFromPath(fullPath)
+	if err != nil {
+		return nil, err
+	}
+	state := &replayFileState{exists: true, content: append([]byte(nil), data...), mode: mode, loaded: true}
 	s.files[path] = state
 	return state, nil
 }
@@ -1481,6 +1487,9 @@ func (s *replayState) validate(change commitFileChange) error {
 		if !bytes.Equal(state.content, change.PreviousContent) {
 			return fmt.Errorf("%s does not match expected preimage", change.Path)
 		}
+		if change.PreviousMode != "" && state.mode != change.PreviousMode {
+			return fmt.Errorf("%s does not match expected mode", change.Path)
+		}
 	case "renamed":
 		oldState, err := s.read(change.OldPath)
 		if err != nil {
@@ -1491,6 +1500,9 @@ func (s *replayState) validate(change commitFileChange) error {
 		}
 		if !bytes.Equal(oldState.content, change.PreviousContent) {
 			return fmt.Errorf("%s does not match expected preimage", change.OldPath)
+		}
+		if change.PreviousMode != "" && oldState.mode != change.PreviousMode {
+			return fmt.Errorf("%s does not match expected mode", change.OldPath)
 		}
 		newState, err := s.read(change.Path)
 		if err != nil {
@@ -1508,12 +1520,12 @@ func (s *replayState) validate(change commitFileChange) error {
 func (s *replayState) apply(change commitFileChange) {
 	switch change.Status {
 	case "added", "modified":
-		s.files[change.Path] = &replayFileState{exists: true, content: append([]byte(nil), change.Content...), loaded: true}
+		s.files[change.Path] = &replayFileState{exists: true, content: append([]byte(nil), change.Content...), mode: replayChangeMode(change), loaded: true}
 	case "deleted":
 		s.files[change.Path] = &replayFileState{exists: false, loaded: true}
 	case "renamed":
 		s.files[change.OldPath] = &replayFileState{exists: false, loaded: true}
-		s.files[change.Path] = &replayFileState{exists: true, content: append([]byte(nil), change.Content...), loaded: true}
+		s.files[change.Path] = &replayFileState{exists: true, content: append([]byte(nil), change.Content...), mode: replayChangeMode(change), loaded: true}
 	}
 }
 
@@ -1530,6 +1542,7 @@ type replayRollback struct {
 type replayFileSnapshot struct {
 	exists  bool
 	content []byte
+	mode    string
 }
 
 func snapshotReplayRollback(repo *gitrepo.Repository, wt *gitrepo.Worktree, workDir string, bundle *commitReplayBundle) (*replayRollback, error) {
@@ -1563,7 +1576,11 @@ func snapshotReplayRollback(repo *gitrepo.Repository, wt *gitrepo.Worktree, work
 					}
 					return nil, err
 				}
-				rollback.fileSnapshots[path] = &replayFileSnapshot{exists: true, content: data}
+				mode, err := fileModeFromPath(filepath.Join(workDir, path))
+				if err != nil {
+					return nil, err
+				}
+				rollback.fileSnapshots[path] = &replayFileSnapshot{exists: true, content: data, mode: mode}
 			}
 		}
 	}
@@ -1577,7 +1594,14 @@ func (r *replayRollback) Restore() error {
 			if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
 				return err
 			}
-			if err := os.WriteFile(fullPath, snapshot.content, 0644); err != nil {
+			mode, err := gitModeToFileMode(snapshot.mode, 0644)
+			if err != nil {
+				return err
+			}
+			if err := os.WriteFile(fullPath, snapshot.content, mode); err != nil {
+				return err
+			}
+			if err := os.Chmod(fullPath, mode); err != nil {
 				return err
 			}
 		} else if err := os.Remove(fullPath); err != nil && !os.IsNotExist(err) {
@@ -1632,7 +1656,14 @@ func applyReplayChange(workDir string, change commitFileChange) error {
 		if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
 			return err
 		}
-		return os.WriteFile(fullPath, change.Content, 0644)
+		mode, err := gitModeToFileMode(replayChangeMode(change), 0644)
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(fullPath, change.Content, mode); err != nil {
+			return err
+		}
+		return os.Chmod(fullPath, mode)
 	case "deleted":
 		if err := os.Remove(filepath.Join(workDir, change.Path)); err != nil && !os.IsNotExist(err) {
 			return err
@@ -1646,10 +1677,52 @@ func applyReplayChange(workDir string, change commitFileChange) error {
 		if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
 			return err
 		}
-		return os.WriteFile(fullPath, change.Content, 0644)
+		mode, err := gitModeToFileMode(replayChangeMode(change), 0644)
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(fullPath, change.Content, mode); err != nil {
+			return err
+		}
+		return os.Chmod(fullPath, mode)
 	default:
 		return fmt.Errorf("unsupported replay change status %q", change.Status)
 	}
+}
+
+func replayChangeMode(change commitFileChange) string {
+	if change.Mode != "" {
+		return change.Mode
+	}
+	if change.PreviousMode != "" {
+		return change.PreviousMode
+	}
+	return ""
+}
+
+func fileModeFromPath(path string) (string, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return "", err
+	}
+	if info.Mode()&0111 != 0 {
+		return "100755", nil
+	}
+	return "100644", nil
+}
+
+func gitModeToFileMode(mode string, fallback os.FileMode) (os.FileMode, error) {
+	if mode == "" {
+		return fallback, nil
+	}
+	if len(mode) < 3 {
+		return 0, fmt.Errorf("invalid git mode %q", mode)
+	}
+	perms, err := strconv.ParseUint(mode[len(mode)-3:], 8, 32)
+	if err != nil {
+		return 0, fmt.Errorf("parse git mode %q: %w", mode, err)
+	}
+	return os.FileMode(perms), nil
 }
 
 func stagePaths(wt *gitrepo.Worktree, paths []string) error {

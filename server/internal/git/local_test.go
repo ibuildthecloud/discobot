@@ -131,25 +131,61 @@ func buildCommitReplayEntry(t *testing.T, dir, parent, sha string) commitReplayE
 			i += 2
 			oldContent := runGitBytes(t, dir, "show", parent+":"+oldPath)
 			newContent := runGitBytes(t, dir, "show", sha+":"+newPath)
-			entry.Changes = append(entry.Changes, commitFileChange{Path: newPath, OldPath: oldPath, Status: "renamed", PreviousContent: oldContent, Content: newContent})
+			entry.Changes = append(entry.Changes, commitFileChange{
+				Path:            newPath,
+				OldPath:         oldPath,
+				Status:          "renamed",
+				PreviousMode:    gitPathModeForTest(t, dir, parent, oldPath),
+				Mode:            gitPathModeForTest(t, dir, sha, newPath),
+				PreviousContent: oldContent,
+				Content:         newContent,
+			})
 		case statusToken == "A":
 			path := tokens[i]
 			i++
-			entry.Changes = append(entry.Changes, commitFileChange{Path: path, Status: "added", Content: runGitBytes(t, dir, "show", sha+":"+path)})
+			entry.Changes = append(entry.Changes, commitFileChange{
+				Path:    path,
+				Status:  "added",
+				Mode:    gitPathModeForTest(t, dir, sha, path),
+				Content: runGitBytes(t, dir, "show", sha+":"+path),
+			})
 		case statusToken == "M":
 			path := tokens[i]
 			i++
-			entry.Changes = append(entry.Changes, commitFileChange{Path: path, Status: "modified", PreviousContent: runGitBytes(t, dir, "show", parent+":"+path), Content: runGitBytes(t, dir, "show", sha+":"+path)})
+			entry.Changes = append(entry.Changes, commitFileChange{
+				Path:            path,
+				Status:          "modified",
+				PreviousMode:    gitPathModeForTest(t, dir, parent, path),
+				Mode:            gitPathModeForTest(t, dir, sha, path),
+				PreviousContent: runGitBytes(t, dir, "show", parent+":"+path),
+				Content:         runGitBytes(t, dir, "show", sha+":"+path),
+			})
 		case statusToken == "D":
 			path := tokens[i]
 			i++
-			entry.Changes = append(entry.Changes, commitFileChange{Path: path, Status: "deleted", PreviousContent: runGitBytes(t, dir, "show", parent+":"+path)})
+			entry.Changes = append(entry.Changes, commitFileChange{
+				Path:            path,
+				Status:          "deleted",
+				PreviousMode:    gitPathModeForTest(t, dir, parent, path),
+				PreviousContent: runGitBytes(t, dir, "show", parent+":"+path),
+			})
 		default:
 			t.Fatalf("unsupported name-status token %q", statusToken)
 		}
 	}
 
 	return entry
+}
+
+func gitPathModeForTest(t *testing.T, dir, ref, path string) string {
+	t.Helper()
+
+	output := strings.TrimSpace(runGit(t, dir, "ls-tree", ref, "--", path))
+	fields := strings.Fields(output)
+	if len(fields) == 0 {
+		t.Fatalf("path %s not found at %s", path, ref)
+	}
+	return fields[0]
 }
 
 func bytesToTokens(data []byte) []string {
@@ -1213,6 +1249,57 @@ func TestApplyReplayBundle(t *testing.T) {
 		}
 		if commits[0].AuthorEmail != "special@example.com" {
 			t.Errorf("Expected email 'special@example.com', got %s", commits[0].AuthorEmail)
+		}
+	})
+
+	t.Run("preserves executable bit changes", func(t *testing.T) {
+		baseDir := t.TempDir()
+		provider, _ := NewLocalProvider(baseDir)
+		sourceRepo := createTestRepo(t)
+
+		workDir, _, _ := provider.EnsureWorkspace(ctx, "project1", "ws1", sourceRepo, "")
+		runGit(t, workDir, "config", "user.email", "committer@example.com")
+		runGit(t, workDir, "config", "user.name", "Test Committer")
+
+		initialCommit := strings.TrimSpace(runGit(t, workDir, "rev-parse", "HEAD"))
+
+		patchRepo := t.TempDir()
+		runGit(t, patchRepo, "init")
+		runGit(t, patchRepo, "config", "user.email", "patch@example.com")
+		runGit(t, patchRepo, "config", "user.name", "Patch Author")
+		runGit(t, patchRepo, "fetch", workDir, "HEAD")
+		runGit(t, patchRepo, "reset", "--hard", "FETCH_HEAD")
+
+		scriptPath := filepath.Join(patchRepo, "script.sh")
+		if err := os.WriteFile(scriptPath, []byte("#!/bin/sh\necho hi\n"), 0644); err != nil {
+			t.Fatalf("Failed to write script: %v", err)
+		}
+		runGit(t, patchRepo, "add", "script.sh")
+		runGit(t, patchRepo, "commit", "-m", "Add script")
+
+		if err := os.Chmod(scriptPath, 0755); err != nil {
+			t.Fatalf("Failed to chmod script: %v", err)
+		}
+		runGit(t, patchRepo, "add", "script.sh")
+		runGit(t, patchRepo, "commit", "-m", "Make script executable")
+
+		bundle := buildCommitReplayBundle(t, patchRepo, initialCommit)
+
+		if _, err := provider.ApplyReplayBundle(ctx, "ws1", bundle); err != nil {
+			t.Fatalf("ApplyReplayBundle failed: %v", err)
+		}
+
+		info, err := os.Stat(filepath.Join(workDir, "script.sh"))
+		if err != nil {
+			t.Fatalf("Failed to stat script: %v", err)
+		}
+		if info.Mode().Perm() != 0755 {
+			t.Fatalf("Expected script.sh mode 0755, got %04o", info.Mode().Perm())
+		}
+
+		mode := gitPathModeForTest(t, workDir, "HEAD", "script.sh")
+		if mode != "100755" {
+			t.Fatalf("Expected git mode 100755, got %s", mode)
 		}
 	})
 }

@@ -3,6 +3,7 @@ package git
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"time"
 )
 
@@ -28,6 +29,8 @@ type commitFileChange struct {
 	OldPath         string `json:"oldPath,omitempty"`
 	Status          string `json:"status"`
 	Binary          bool   `json:"binary,omitempty"`
+	PreviousMode    string `json:"previousMode,omitempty"`
+	Mode            string `json:"mode,omitempty"`
 	PreviousContent []byte `json:"previousContent,omitempty"`
 	Content         []byte `json:"content,omitempty"`
 }
@@ -53,6 +56,12 @@ func decodeCommitReplayBundle(payload []byte) (*commitReplayBundle, error) {
 			return nil, fmt.Errorf("commit replay bundle entry %d has no changes", i)
 		}
 		for j, change := range commit.Changes {
+			if err := validateReplayFileMode(change.PreviousMode); err != nil {
+				return nil, fmt.Errorf("commit replay bundle entry %d change %d has invalid previous mode: %w", i, j, err)
+			}
+			if err := validateReplayFileMode(change.Mode); err != nil {
+				return nil, fmt.Errorf("commit replay bundle entry %d change %d has invalid mode: %w", i, j, err)
+			}
 			switch change.Status {
 			case "added":
 				if change.Path == "" {
@@ -73,4 +82,17 @@ func decodeCommitReplayBundle(payload []byte) (*commitReplayBundle, error) {
 	}
 
 	return &bundle, nil
+}
+
+func validateReplayFileMode(mode string) error {
+	if mode == "" {
+		return nil
+	}
+	if len(mode) != 6 {
+		return fmt.Errorf("expected 6-digit git file mode, got %q", mode)
+	}
+	if _, err := strconv.ParseUint(mode, 8, 32); err != nil {
+		return fmt.Errorf("parse %q: %w", mode, err)
+	}
+	return nil
 }
