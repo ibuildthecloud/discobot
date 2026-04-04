@@ -51,6 +51,17 @@ func TestBuiltinTools_AllDefined(t *testing.T) {
 	}
 }
 
+func TestDefaultBuiltinTools_ExcludesEnterPlanMode(t *testing.T) {
+	tools := DefaultBuiltinTools("")
+
+	if hasTool(tools, "EnterPlanMode") {
+		t.Fatal("EnterPlanMode should not be included in the default tool set")
+	}
+	if !hasTool(tools, "ExitPlanMode") {
+		t.Fatal("ExitPlanMode should remain available in the default tool set")
+	}
+}
+
 func TestBuiltinTools_ValidSchemas(t *testing.T) {
 	tools := BuiltinTools("")
 
@@ -293,4 +304,13 @@ func findToolSchema(t *testing.T, name string) map[string]any {
 	}
 	t.Fatalf("%s tool not found", name)
 	return nil
+}
+
+func hasTool(tools []providers.ToolDefinition, name string) bool {
+	for _, tool := range tools {
+		if tool.Name == name {
+			return true
+		}
+	}
+	return false
 }

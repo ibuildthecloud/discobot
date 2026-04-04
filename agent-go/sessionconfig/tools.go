@@ -1142,6 +1142,20 @@ Important:
 	}
 }
 
+// DefaultBuiltinTools returns the built-in tools that should be exposed by default.
+// EnterPlanMode remains implemented, but is intentionally excluded from the default set.
+func DefaultBuiltinTools(modelName string) []providers.ToolDefinition {
+	tools := BuiltinTools(modelName)
+	filtered := make([]providers.ToolDefinition, 0, len(tools))
+	for _, tool := range tools {
+		if tool.Name == "EnterPlanMode" {
+			continue
+		}
+		filtered = append(filtered, tool)
+	}
+	return filtered
+}
+
 // mustJSON marshals v to json.RawMessage, panicking on error.
 func mustJSON(v any) json.RawMessage {
 	data, err := json.Marshal(v)

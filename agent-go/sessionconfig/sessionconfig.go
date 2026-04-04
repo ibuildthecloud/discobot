@@ -67,7 +67,7 @@ func Load(cwd string) (*SessionConfig, error) {
 	cfg.UserInstructions = entries
 
 	// 3. Load built-in tool definitions.
-	cfg.Tools = BuiltinTools("")
+	cfg.Tools = DefaultBuiltinTools("")
 
 	// 4. Discover MCP server configs.
 	projectRoot := findProjectRoot(cwd)

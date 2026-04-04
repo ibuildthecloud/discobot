@@ -489,7 +489,7 @@ func (a *DefaultAgent) resolvePromptEnvironment(ctx context.Context, threadID st
 
 	displayName := resolveModelDisplayName(ref.ProviderID, ref.ModelID)
 	if req.Tools == nil && req.SubagentType == "" {
-		tools = sessionconfig.BuiltinTools(displayName)
+		tools = sessionconfig.DefaultBuiltinTools(displayName)
 		if mcpMgr != nil {
 			tools = append(tools, mcpMgr.Tools()...)
 		}
