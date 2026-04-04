@@ -243,6 +243,7 @@
 	minimizeLabel="Minimize desktop panel"
 	{maximizeTitle}
 	shellClass="min-h-[28rem]"
+	contentClass="min-h-0 min-w-0 flex-1 overflow-hidden"
 >
 	{#snippet title()}
 		<div class="flex min-w-0 items-center gap-2 text-xs">
@@ -252,7 +253,7 @@
 		</div>
 	{/snippet}
 
-	<div class="relative h-full min-h-0 overflow-hidden p-3">
+	<div class="relative h-full min-h-0 min-w-0 overflow-hidden p-3">
 		{#if connectionStatus !== "connected"}
 			<div
 				class="absolute inset-3 z-10 flex items-center justify-center rounded-md bg-black/35"

@@ -495,6 +495,7 @@
 	minimizeLabel="Minimize terminal panel"
 	{maximizeTitle}
 	shellClass="min-h-[28rem]"
+	contentClass="min-h-0 min-w-0 flex-1 overflow-hidden"
 >
 	{#snippet title()}
 		<span class="truncate text-xs text-sidebar-foreground/70"
@@ -533,7 +534,7 @@
 		{/if}
 	{/snippet}
 
-	<div class="relative h-full min-h-0 overflow-hidden p-3">
+	<div class="relative h-full min-h-0 min-w-0 overflow-hidden p-3">
 		{#if connectionStatus !== "connected"}
 			<div
 				class="absolute inset-3 z-10 flex items-center justify-center rounded-md bg-black/35"
