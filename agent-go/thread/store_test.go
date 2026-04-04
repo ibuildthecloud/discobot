@@ -168,6 +168,113 @@ func TestBuildHistory_BrokenChain(t *testing.T) {
 	}
 }
 
+func TestBuildHistory_IgnoresCorruptAncestor(t *testing.T) {
+	store := NewStore(t.TempDir())
+	threadID := "thread1"
+
+	for _, msg := range []StoredMessage{
+		{
+			ID:      "msg1",
+			Message: message.Message{Role: "system", Parts: []message.Part{message.TextPart{Text: "system"}}},
+		},
+		{
+			ID:       "msg2",
+			ParentID: "msg1",
+			Message:  message.Message{Role: "user", Parts: []message.Part{message.TextPart{Text: "hello"}}},
+		},
+		{
+			ID:       "msg3",
+			ParentID: "msg2",
+			Message:  message.Message{Role: "assistant", Parts: []message.Part{message.TextPart{Text: "world"}}},
+		},
+	} {
+		if err := store.SaveMessage(threadID, msg); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	path := filepath.Join(store.messagesDir(threadID), "msg2.json")
+	if err := os.WriteFile(path, []byte(`{"id":"msg2"`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	history, err := store.BuildHistory(threadID, "msg3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(history) != 1 {
+		t.Fatalf("expected 1 message after skipping corrupt ancestor, got %d", len(history))
+	}
+	if history[0].Role != "assistant" {
+		t.Fatalf("expected assistant message, got %s", history[0].Role)
+	}
+}
+
+func TestBuildHistoryWithIDs_IgnoresCorruptAncestor(t *testing.T) {
+	store := NewStore(t.TempDir())
+	threadID := "thread1"
+
+	for _, msg := range []StoredMessage{
+		{
+			ID:      "msg1",
+			Message: message.Message{Role: "system"},
+		},
+		{
+			ID:       "msg2",
+			ParentID: "msg1",
+			Message:  message.Message{Role: "user"},
+		},
+		{
+			ID:       "msg3",
+			ParentID: "msg2",
+			Message:  message.Message{Role: "assistant"},
+		},
+	} {
+		if err := store.SaveMessage(threadID, msg); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	path := filepath.Join(store.messagesDir(threadID), "msg2.json")
+	if err := os.WriteFile(path, []byte(`{"id":"msg2"`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	history, err := store.BuildHistoryWithIDs(threadID, "msg3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(history) != 1 {
+		t.Fatalf("expected 1 entry after skipping corrupt ancestor, got %d", len(history))
+	}
+	if history[0].ID != "msg3" {
+		t.Fatalf("expected msg3, got %s", history[0].ID)
+	}
+}
+
+func TestFindLeaf_IgnoresCorruptMessage(t *testing.T) {
+	store := NewStore(t.TempDir())
+	threadID := "thread1"
+
+	if err := store.SaveMessage(threadID, StoredMessage{
+		ID:      "msg1",
+		Message: message.Message{Role: "user"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(store.messagesDir(threadID), "msg2.json"), []byte(`{"id":"msg2"`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	leaf, err := store.FindLeaf(threadID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if leaf != "msg1" {
+		t.Fatalf("expected msg1 leaf, got %s", leaf)
+	}
+}
+
 func TestListThreads(t *testing.T) {
 	dir := t.TempDir()
 	store := NewStore(dir)

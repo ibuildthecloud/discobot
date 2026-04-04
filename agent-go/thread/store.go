@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,6 +14,8 @@ import (
 	"github.com/obot-platform/discobot/agent-go/message"
 	"github.com/obot-platform/discobot/agent-go/providers"
 )
+
+var ErrCorruptMessage = errors.New("corrupt message")
 
 // writeFileAtomic writes data to path atomically using a temp-file + rename.
 // The temp file is created in the same directory as path so the rename is
@@ -106,7 +109,7 @@ func (s *Store) LoadMessage(threadID, msgID string) (StoredMessage, error) {
 	}
 	var msg StoredMessage
 	if err := json.Unmarshal(data, &msg); err != nil {
-		return StoredMessage{}, fmt.Errorf("unmarshal message %s: %w", msgID, err)
+		return StoredMessage{}, fmt.Errorf("%w %s: %v", ErrCorruptMessage, msgID, err)
 	}
 	return msg, nil
 }
@@ -124,6 +127,10 @@ func (s *Store) BuildHistory(threadID, leafID string) ([]message.Message, error)
 		seen[currentID] = struct{}{}
 		msg, err := s.LoadMessage(threadID, currentID)
 		if err != nil {
+			if errors.Is(err, ErrCorruptMessage) {
+				log.Printf("thread store: skipping corrupt message %s in thread %s while building history: %v", currentID, threadID, err)
+				break
+			}
 			return nil, fmt.Errorf("build history: %w", err)
 		}
 		chain = append(chain, msg.Message)
@@ -156,6 +163,10 @@ func (s *Store) BuildHistoryWithIDs(threadID, leafID string) ([]HistoryEntry, er
 		seen[currentID] = struct{}{}
 		msg, err := s.LoadMessage(threadID, currentID)
 		if err != nil {
+			if errors.Is(err, ErrCorruptMessage) {
+				log.Printf("thread store: skipping corrupt message %s in thread %s while building history with IDs: %v", currentID, threadID, err)
+				break
+			}
 			return nil, fmt.Errorf("build history: %w", err)
 		}
 		chain = append(chain, HistoryEntry(msg))
@@ -869,11 +880,14 @@ func (s *Store) FindLeaf(threadID string) (string, error) {
 			continue
 		}
 		id := name[:len(name)-5]
-		allIDs = append(allIDs, id)
 		msg, err := s.LoadMessage(threadID, id)
 		if err != nil {
+			if errors.Is(err, ErrCorruptMessage) {
+				log.Printf("thread store: skipping corrupt message %s in thread %s while finding leaf: %v", id, threadID, err)
+			}
 			continue
 		}
+		allIDs = append(allIDs, id)
 		if msg.ParentID != "" {
 			parentIDs[msg.ParentID] = true
 		}
