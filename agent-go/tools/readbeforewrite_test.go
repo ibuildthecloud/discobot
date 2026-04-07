@@ -142,11 +142,12 @@ func TestReadBeforeWrite_ExistingFileWithoutRead_Edit(t *testing.T) {
 		"old_string": "world",
 		"new_string": "Go",
 	})
-	if ok {
-		t.Error("expected error when editing existing file without prior read, got success")
+	if !ok {
+		t.Fatalf("expected success without prior read, got: %s", out)
 	}
-	if !strings.Contains(out, "read") {
-		t.Errorf("expected 'read' hint in error message, got: %q", out)
+	data, _ := os.ReadFile(filepath.Join(cwd, "file.txt"))
+	if string(data) != "hello Go\n" {
+		t.Errorf("unexpected file content: %q", string(data))
 	}
 }
 
@@ -171,8 +172,6 @@ func TestReadBeforeWrite_ExistingFileAfterRead_Edit(t *testing.T) {
 	}
 }
 
-// TestReadBeforeWrite_FileModifiedSinceRead_Edit checks that Edit rejects a
-// stale record when the file has changed since the Read tool was last called.
 func TestReadBeforeWrite_FileModifiedSinceRead_Edit(t *testing.T) {
 	cwd := t.TempDir()
 	filePath := filepath.Join(cwd, "file.txt")
@@ -192,11 +191,8 @@ func TestReadBeforeWrite_FileModifiedSinceRead_Edit(t *testing.T) {
 		"old_string": "world",
 		"new_string": "Go",
 	})
-	if ok {
-		t.Error("expected error when file was modified since last read, got success")
-	}
-	if !strings.Contains(out, "changed") {
-		t.Errorf("expected 'changed' in error message, got: %q", out)
+	if !ok {
+		t.Fatalf("expected success after file changed since read, got: %s", out)
 	}
 }
 

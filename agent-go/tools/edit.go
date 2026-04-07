@@ -40,9 +40,6 @@ func (e *Executor) executeEdit(call message.ToolCallPart) (thread.ToolExecuteRes
 		return errResult(call, err.Error()), nil
 	}
 
-	if err := e.checkWriteAllowed(path, input.FilePath); err != nil {
-		return errResult(call, err.Error()), nil
-	}
 	if err := validateToolReadableTextFile(data, input.FilePath); err != nil {
 		return errResult(call, err.Error()), nil
 	}

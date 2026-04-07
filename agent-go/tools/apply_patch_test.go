@@ -257,6 +257,28 @@ func TestApplyPatch_DeleteFile(t *testing.T) {
 	}
 }
 
+func TestApplyPatch_DeleteFileStillRequiresRead(t *testing.T) {
+	cwd := t.TempDir()
+	path := filepath.Join(cwd, "remove.txt")
+	if err := os.WriteFile(path, []byte("to be removed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	e := New(cwd, t.TempDir(), t.Name())
+
+	patch := `*** Begin Patch
+*** Delete File: remove.txt
+*** End Patch`
+
+	out, ok := runApplyPatch(t, e, patch)
+	if ok {
+		t.Fatal("expected read-before-write error")
+	}
+	if !strings.Contains(out, "read") {
+		t.Fatalf("expected read hint in output, got: %q", out)
+	}
+}
+
 func TestApplyPatch_UpdateFileWithChunks(t *testing.T) {
 	cwd := t.TempDir()
 	path := filepath.Join(cwd, "file.txt")
@@ -265,7 +287,6 @@ func TestApplyPatch_UpdateFileWithChunks(t *testing.T) {
 	}
 
 	e := New(cwd, t.TempDir(), t.Name())
-	primeRead(t, e, "file.txt")
 
 	patch := `*** Begin Patch
 *** Update File: file.txt
@@ -387,6 +408,56 @@ func TestApplyPatch_RejectsBinarySourceFile(t *testing.T) {
 	}
 }
 
+func TestApplyPatch_AmbiguousExpectedLinesFail(t *testing.T) {
+	cwd := t.TempDir()
+	if err := os.WriteFile(filepath.Join(cwd, "file.txt"), []byte("foo\nbar\nfoo\nbar\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	e := New(cwd, t.TempDir(), t.Name())
+
+	patch := `*** Begin Patch
+*** Update File: file.txt
+@@
+-foo
+-bar
++foo
++baz
+*** End Patch`
+
+	out, ok := runApplyPatch(t, e, patch)
+	if ok {
+		t.Fatal("expected ambiguity failure")
+	}
+	if !strings.Contains(out, "ambiguous") {
+		t.Fatalf("unexpected output: %q", out)
+	}
+}
+
+func TestApplyPatch_AmbiguousContextFails(t *testing.T) {
+	cwd := t.TempDir()
+	if err := os.WriteFile(filepath.Join(cwd, "file.txt"), []byte("ctx\nvalue\nctx\nvalue\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	e := New(cwd, t.TempDir(), t.Name())
+
+	patch := `*** Begin Patch
+*** Update File: file.txt
+@@ ctx
+-value
++VALUE
+*** End Patch`
+
+	out, ok := runApplyPatch(t, e, patch)
+	if ok {
+		t.Fatal("expected ambiguity failure")
+	}
+	if !strings.Contains(out, "ambiguous") {
+		t.Fatalf("unexpected output: %q", out)
+	}
+}
+
 func TestApplyPatch_UnicodeNormalizedMatching(t *testing.T) {
 	cwd := t.TempDir()
 	line := "import asyncio  # local import – avoids top‑level dep\n"
@@ -421,7 +492,7 @@ func TestApplyPatch_UnicodeNormalizedMatching(t *testing.T) {
 	}
 }
 
-func TestApplyPatch_ReadBeforeWriteEnforced(t *testing.T) {
+func TestApplyPatch_InsertionOnlyUpdateStillRequiresRead(t *testing.T) {
 	cwd := t.TempDir()
 	if err := os.WriteFile(filepath.Join(cwd, "file.txt"), []byte("hello\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -431,7 +502,6 @@ func TestApplyPatch_ReadBeforeWriteEnforced(t *testing.T) {
 	patch := `*** Begin Patch
 *** Update File: file.txt
 @@
--hello
 +HELLO
 *** End Patch`
 

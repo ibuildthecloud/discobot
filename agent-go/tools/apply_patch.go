@@ -129,10 +129,17 @@ func (e *Executor) applyPatchOperations(ops []patchOperation) (*patchAffectedPat
 	for _, op := range ops {
 		srcPath := resolvePath(e.cwd, op.path)
 
+		srcInfo, srcExists, err := statIfExists(srcPath)
+		if err != nil {
+			return nil, err
+		}
+
 		switch op.kind {
 		case patchAddFile:
-			if err := e.checkWriteAllowed(srcPath, op.path); err != nil {
-				return nil, err
+			if srcExists {
+				if err := e.checkRecordedRead(srcInfo, srcPath, op.path); err != nil {
+					return nil, err
+				}
 			}
 			if err := os.MkdirAll(filepath.Dir(srcPath), 0o755); err != nil {
 				return nil, fmt.Errorf("failed to create parent directory: %v", err)
@@ -161,8 +168,10 @@ func (e *Executor) applyPatchOperations(ops []patchOperation) (*patchAffectedPat
 			affected.deleted = append(affected.deleted, op.path)
 
 		case patchUpdateFile:
-			if err := e.checkWriteAllowed(srcPath, op.path); err != nil {
-				return nil, err
+			if !op.canApplyWithoutRead() {
+				if err := e.checkWriteAllowed(srcPath, op.path); err != nil {
+					return nil, err
+				}
 			}
 
 			data, err := os.ReadFile(srcPath)
@@ -213,6 +222,29 @@ func (e *Executor) applyPatchOperations(ops []patchOperation) (*patchAffectedPat
 	}
 
 	return affected, nil
+}
+
+func statIfExists(path string) (os.FileInfo, bool, error) {
+	info, err := os.Stat(path)
+	if os.IsNotExist(err) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	return info, true, nil
+}
+
+func (op patchOperation) canApplyWithoutRead() bool {
+	if op.kind != patchUpdateFile || op.movePath != "" || len(op.chunks) == 0 {
+		return false
+	}
+	for _, chunk := range op.chunks {
+		if len(chunk.oldLines) == 0 {
+			return false
+		}
+	}
+	return true
 }
 
 func (e *Executor) removeFileRecord(absPath string) {
@@ -459,9 +491,12 @@ func computePatchReplacements(originalLines []string, displayPath string, chunks
 	for _, chunk := range chunks {
 		if chunk.changeContext != nil {
 			ctx := []string{*chunk.changeContext}
-			idx := seekPatchSequence(originalLines, ctx, lineIndex, false)
+			idx, ambiguous := seekUniquePatchSequence(originalLines, ctx, lineIndex, false)
 			if idx < 0 {
 				return nil, fmt.Errorf("failed to find context '%s' in %s", *chunk.changeContext, displayPath)
+			}
+			if ambiguous {
+				return nil, fmt.Errorf("context '%s' is ambiguous in %s", *chunk.changeContext, displayPath)
 			}
 			lineIndex = idx + 1
 		}
@@ -481,19 +516,26 @@ func computePatchReplacements(originalLines []string, displayPath string, chunks
 
 		pattern := append([]string(nil), chunk.oldLines...)
 		newSlice := append([]string(nil), chunk.newLines...)
-		found := seekPatchSequence(originalLines, pattern, lineIndex, chunk.isEndOfFile)
+		found, ambiguous := seekUniquePatchSequence(originalLines, pattern, lineIndex, chunk.isEndOfFile)
 
 		if found < 0 && len(pattern) > 0 && pattern[len(pattern)-1] == "" {
 			pattern = pattern[:len(pattern)-1]
 			if len(newSlice) > 0 && newSlice[len(newSlice)-1] == "" {
 				newSlice = newSlice[:len(newSlice)-1]
 			}
-			found = seekPatchSequence(originalLines, pattern, lineIndex, chunk.isEndOfFile)
+			found, ambiguous = seekUniquePatchSequence(originalLines, pattern, lineIndex, chunk.isEndOfFile)
 		}
 
 		if found < 0 {
 			return nil, fmt.Errorf(
 				"failed to find expected lines in %s:\n%s",
+				displayPath,
+				strings.Join(chunk.oldLines, "\n"),
+			)
+		}
+		if ambiguous {
+			return nil, fmt.Errorf(
+				"expected lines are ambiguous in %s:\n%s",
 				displayPath,
 				strings.Join(chunk.oldLines, "\n"),
 			)
@@ -546,14 +588,27 @@ func applyPatchReplacements(lines []string, replacements []patchReplacement) []s
 }
 
 func seekPatchSequence(lines []string, pattern []string, start int, eof bool) int {
+	idx, _ := seekUniquePatchSequence(lines, pattern, start, eof)
+	return idx
+}
+
+func seekUniquePatchSequence(lines []string, pattern []string, start int, eof bool) (int, bool) {
+	matches := seekPatchSequenceMatches(lines, pattern, start, eof)
+	if len(matches) == 0 {
+		return -1, false
+	}
+	return matches[0], len(matches) > 1
+}
+
+func seekPatchSequenceMatches(lines []string, pattern []string, start int, eof bool) []int {
 	if len(pattern) == 0 {
 		if start < 0 {
-			return 0
+			return []int{0}
 		}
-		return start
+		return []int{start}
 	}
 	if len(pattern) > len(lines) {
-		return -1
+		return nil
 	}
 
 	searchStart := start
@@ -566,31 +621,30 @@ func seekPatchSequence(lines []string, pattern []string, start int, eof bool) in
 
 	maxStart := len(lines) - len(pattern)
 	if searchStart > maxStart {
-		return -1
+		return nil
 	}
 
-	for i := searchStart; i <= maxStart; i++ {
-		if patchExactMatch(lines, pattern, i) {
-			return i
+	matches := make([]int, 0)
+	seen := make(map[int]struct{})
+	for _, matcher := range []func([]string, []string, int) bool{
+		patchExactMatch,
+		patchTrimEndMatch,
+		patchTrimMatch,
+		patchNormalizedMatch,
+	} {
+		for i := searchStart; i <= maxStart; i++ {
+			if !matcher(lines, pattern, i) {
+				continue
+			}
+			if _, ok := seen[i]; ok {
+				continue
+			}
+			seen[i] = struct{}{}
+			matches = append(matches, i)
 		}
 	}
-	for i := searchStart; i <= maxStart; i++ {
-		if patchTrimEndMatch(lines, pattern, i) {
-			return i
-		}
-	}
-	for i := searchStart; i <= maxStart; i++ {
-		if patchTrimMatch(lines, pattern, i) {
-			return i
-		}
-	}
-	for i := searchStart; i <= maxStart; i++ {
-		if patchNormalizedMatch(lines, pattern, i) {
-			return i
-		}
-	}
-
-	return -1
+	sort.Ints(matches)
+	return matches
 }
 
 func patchExactMatch(lines []string, pattern []string, start int) bool {

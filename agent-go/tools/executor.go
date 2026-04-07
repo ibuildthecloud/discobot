@@ -135,7 +135,10 @@ func (e *Executor) checkWriteAllowed(absPath, displayPath string) error {
 	if err != nil {
 		return err
 	}
+	return e.checkRecordedRead(info, absPath, displayPath)
+}
 
+func (e *Executor) checkRecordedRead(info os.FileInfo, absPath, displayPath string) error {
 	e.fileReadsMu.RLock()
 	rec, ok := e.fileReads[absPath]
 	e.fileReadsMu.RUnlock()
