@@ -37,6 +37,12 @@ func DefaultVZImage() string {
 type Config struct {
 	// Server settings
 	Port               int
+	HTTPSPort          int
+	HTTPSTLSMode       string
+	HTTPSTLSCertFile   string
+	HTTPSTLSKeyFile    string
+	HTTPSTLSHosts      []string
+	HTTPSACMEEmail     string
 	CORSOrigins        []string
 	CORSDebug          bool // Enable CORS debug logging (default: false)
 	SuggestionsEnabled bool // Enable filesystem suggestions API (default: false)
@@ -135,9 +141,34 @@ func Load() (*Config, error) {
 
 	// Server
 	cfg.Port = getEnvInt("PORT", 3001)
-	cfg.CORSOrigins = getEnvList("CORS_ORIGINS", []string{"http://*.localhost:3001", "http://localhost:3000", "http://*.localhost:3000", "http://localhost:3100", "http://*.localhost:3100"})
+	cfg.HTTPSPort = getEnvInt("HTTPS_PORT", 0)
+	cfg.HTTPSTLSMode = strings.ToLower(getEnv("HTTPS_TLS_MODE", "ephemeral"))
+	cfg.HTTPSTLSCertFile = getEnv("HTTPS_TLS_CERT_FILE", "")
+	cfg.HTTPSTLSKeyFile = getEnv("HTTPS_TLS_KEY_FILE", "")
+	cfg.HTTPSTLSHosts = getEnvList("HTTPS_TLS_HOSTS", []string{"localhost"})
+	cfg.HTTPSACMEEmail = getEnv("HTTPS_ACME_EMAIL", "")
+	cfg.HTTPSTLSHosts = compactStrings(cfg.HTTPSTLSHosts)
+	cfg.CORSOrigins = loadCORSOrigins(cfg.Port, cfg.HTTPSPort, cfg.HTTPSTLSHosts)
 	cfg.CORSDebug = getEnvBool("CORS_DEBUG", false)
 	cfg.SuggestionsEnabled = getEnvBool("SUGGESTIONS_ENABLED", false)
+
+	if cfg.HTTPSPort == cfg.Port && cfg.HTTPSPort > 0 {
+		return nil, fmt.Errorf("HTTPS_PORT must be different from PORT")
+	}
+	switch cfg.HTTPSTLSMode {
+	case "", "ephemeral":
+		cfg.HTTPSTLSMode = "ephemeral"
+	case "static":
+		if cfg.HTTPSPort > 0 && (cfg.HTTPSTLSCertFile == "" || cfg.HTTPSTLSKeyFile == "") {
+			return nil, fmt.Errorf("HTTPS_TLS_CERT_FILE and HTTPS_TLS_KEY_FILE are required when HTTPS_TLS_MODE=static")
+		}
+	case "acme":
+		if cfg.HTTPSPort > 0 && len(cfg.HTTPSTLSHosts) == 0 {
+			return nil, fmt.Errorf("HTTPS_TLS_HOSTS is required when HTTPS_TLS_MODE=acme")
+		}
+	default:
+		return nil, fmt.Errorf("HTTPS_TLS_MODE must be one of: ephemeral, static, acme")
+	}
 
 	// Database - defaults to XDG_DATA_HOME/discobot/discobot.db
 	cfg.DatabaseDSN = getEnv("DATABASE_DSN", "sqlite3://"+filepath.Join(xdg.DataHome, appName, "discobot.db"))
@@ -319,6 +350,68 @@ func getEnvList(key string, defaultValue []string) []string {
 		return strings.Split(value, ",")
 	}
 	return defaultValue
+}
+
+func loadCORSOrigins(httpPort, httpsPort int, httpsHosts []string) []string {
+	origins := getEnvList("CORS_ORIGINS", defaultCORSOrigins(httpPort, httpsPort, httpsHosts))
+	return expandCORSOriginTemplates(origins, httpPort, httpsPort)
+}
+
+func defaultCORSOrigins(httpPort, httpsPort int, httpsHosts []string) []string {
+	listenerHosts := compactStrings(httpsHosts)
+	if len(listenerHosts) == 0 {
+		listenerHosts = []string{"localhost"}
+	}
+
+	origins := make([]string, 0, len(listenerHosts)*2+6)
+	for _, host := range listenerHosts {
+		origins = append(origins, fmt.Sprintf("http://%s:%d", host, httpPort))
+		if host == "localhost" {
+			origins = append(origins, fmt.Sprintf("http://*.localhost:%d", httpPort))
+		}
+	}
+	origins = append(origins,
+		"http://localhost:3000",
+		"http://*.localhost:3000",
+		"http://localhost:3100",
+		"http://*.localhost:3100",
+	)
+	if httpsPort > 0 {
+		for _, host := range listenerHosts {
+			origins = append(origins, fmt.Sprintf("https://%s:%d", host, httpsPort))
+			if host == "localhost" {
+				origins = append(origins, fmt.Sprintf("https://*.localhost:%d", httpsPort))
+			}
+		}
+	}
+	return origins
+}
+
+func expandCORSOriginTemplates(origins []string, httpPort, httpsPort int) []string {
+	result := make([]string, 0, len(origins))
+	for _, origin := range compactStrings(origins) {
+		expanded := strings.ReplaceAll(origin, "{HTTP_PORT}", strconv.Itoa(httpPort))
+		if strings.Contains(expanded, "{HTTPS_PORT}") {
+			if httpsPort <= 0 {
+				continue
+			}
+			expanded = strings.ReplaceAll(expanded, "{HTTPS_PORT}", strconv.Itoa(httpsPort))
+		}
+		result = append(result, expanded)
+	}
+	return result
+}
+
+func compactStrings(values []string) []string {
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		result = append(result, value)
+	}
+	return result
 }
 
 func getEnvDuration(key string, defaultValue time.Duration) time.Duration {
