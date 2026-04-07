@@ -28,6 +28,7 @@ import type {
 	AnswerQuestionRequest,
 	AnswerQuestionResponse,
 	AuthProvider,
+	AuthUser,
 	CancelChatResponse,
 	CreateThreadRequest,
 	CodexDeviceCodeResponse,
@@ -100,9 +101,13 @@ class ApiClient {
 	private get rootBase() {
 		return getApiRootBase();
 	}
+	private get authBase() {
+		return this.rootBase.replace(/\/api$/, "");
+	}
 
 	private async fetch<T>(path: string, options?: RequestInit): Promise<T> {
 		const response = await fetch(appendAuthToken(`${this.base}${path}`), {
+			credentials: "include",
 			...options,
 			headers: {
 				"Content-Type": "application/json",
@@ -130,6 +135,7 @@ class ApiClient {
 		options?: RequestInit,
 	): Promise<string> {
 		const response = await fetch(appendAuthToken(`${this.base}${path}`), {
+			credentials: "include",
 			...options,
 			headers: {
 				...options?.headers,
@@ -149,6 +155,7 @@ class ApiClient {
 	// Fetch from root API (not project-scoped)
 	private async fetchRoot<T>(path: string, options?: RequestInit): Promise<T> {
 		const response = await fetch(appendAuthToken(`${this.rootBase}${path}`), {
+			credentials: "include",
 			...options,
 			headers: {
 				"Content-Type": "application/json",
@@ -177,6 +184,47 @@ class ApiClient {
 
 	async getSupportInfo(): Promise<SupportInfoResponse> {
 		return this.fetchRoot<SupportInfoResponse>("/support-info");
+	}
+
+	async getCurrentUser(): Promise<AuthUser | null> {
+		const response = await fetch(appendAuthToken(`${this.authBase}/auth/me`), {
+			credentials: "include",
+		});
+		if (response.status === 401) {
+			return null;
+		}
+		if (!response.ok) {
+			const error = await response
+				.json()
+				.catch(() => ({ error: "Request failed" }));
+			throw new Error(error.error || "Request failed");
+		}
+		return response.json();
+	}
+
+	getLoginUrl(returnTo?: string): string {
+		const loginUrl = new URL(appendAuthToken(`${this.authBase}/auth/login`));
+		if (returnTo) {
+			loginUrl.searchParams.set("return_to", returnTo);
+		}
+		return loginUrl.toString();
+	}
+
+	async logout(): Promise<void> {
+		const response = await fetch(
+			appendAuthToken(`${this.authBase}/auth/logout`),
+			{
+				credentials: "include",
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+			},
+		);
+		if (!response.ok) {
+			const error = await response
+				.json()
+				.catch(() => ({ error: "Request failed" }));
+			throw new Error(error.error || "Request failed");
+		}
 	}
 
 	// Providers

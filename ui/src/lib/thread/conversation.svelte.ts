@@ -247,6 +247,7 @@ export function createConversationDomain(args: CreateConversationDomainArgs) {
 		activeStreamKey = streamKey(args.sessionId);
 		const source = new EventSource(
 			api.getThreadChatStreamUrl(args.sessionId, args.threadId, true),
+			{ withCredentials: true },
 		);
 		activeSource = source;
 		source.onopen = () => {

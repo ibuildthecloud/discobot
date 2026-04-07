@@ -78,6 +78,7 @@ function startProjectEventsSubscription(app: AppContext) {
 		eventSource?.close();
 		const nextEventSource = new EventSource(
 			appendAuthToken(`${getApiBase()}/events`),
+			{ withCredentials: true },
 		);
 		eventSource = nextEventSource;
 

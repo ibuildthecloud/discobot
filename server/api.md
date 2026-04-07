@@ -11,7 +11,6 @@ go run ./cmd/server/main.go
 
 # Run with SQLite + authentication enabled
 export AUTH_ENABLED=true
-export SESSION_SECRET="your-secret-at-least-32-chars-long"
 export ENCRYPTION_KEY="0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"  # 64 hex chars = 32 bytes
 go run ./cmd/server/main.go
 
@@ -69,22 +68,21 @@ server/
 |----------|----------|---------|-------------|
 | `PORT` | No | 8080 | Server port |
 | `DATABASE_DSN` | No | sqlite3://./discobot.db | Database connection string |
-| `AUTH_ENABLED` | No | false | Enable authentication (requires OAuth setup) |
-| `SESSION_SECRET` | When auth enabled | dev default | Secret for session tokens (min 32 chars) |
+| `AUTH_ENABLED` | No | false | Enable authentication (requires OIDC setup) |
 | `ENCRYPTION_KEY` | When auth enabled | dev default | 32-byte hex-encoded key for credential encryption |
 | `CORS_ORIGINS` | No | Computed from HTTP/HTTPS ports plus local dev UI ports | Comma-separated allowed origins; supports `{HTTP_PORT}` and `{HTTPS_PORT}` placeholders |
 | `WORKSPACE_DIR` | No | ./workspaces | Directory for workspace files |
-| `GITHUB_CLIENT_ID` | No | - | GitHub OAuth client ID |
-| `GITHUB_CLIENT_SECRET` | No | - | GitHub OAuth client secret |
-| `GOOGLE_CLIENT_ID` | No | - | Google OAuth client ID |
-| `GOOGLE_CLIENT_SECRET` | No | - | Google OAuth client secret |
+| `OIDC_ISSUER_URL` | No | - | OIDC issuer URL for Discobot login |
+| `OIDC_CLIENT_ID` | No | - | OIDC client ID for Discobot login |
+| `OIDC_CLIENT_SECRET` | No | - | OIDC client secret for Discobot login |
+| `OIDC_SCOPES` | No | openid,email,profile | Comma-separated OIDC scopes |
 
 ### Anonymous User Mode (Default)
 
 When `AUTH_ENABLED=false` (the default):
 - No login is required - all requests use the anonymous user
 - A default project is created automatically with ID `local`
-- SESSION_SECRET and ENCRYPTION_KEY use insecure defaults (fine for local dev)
+- ENCRYPTION_KEY uses an insecure default (fine for local dev)
 - The `/auth/me` endpoint returns the anonymous user info
 - All API endpoints are accessible without authentication
 
@@ -129,10 +127,10 @@ The database schema does NOT use cascading deletes (`ON DELETE CASCADE`). All re
 
 ### Authentication Flow
 
-1. User visits `/auth/login/{provider}` (github or google)
-2. Server generates OAuth state, stores in cookie, redirects to provider
-3. Provider redirects back to `/auth/callback/{provider}` with code
-4. Server exchanges code for token, fetches user info
+1. User visits `/auth/login`
+2. Server generates OIDC state, nonce, and PKCE verifier, stores them in cookies, and redirects to the provider
+3. Provider redirects back to `/auth/callback` with code
+4. Server exchanges code for tokens, verifies the ID token, and reads user claims
 5. Server creates/updates user in DB, creates session
 6. Session token stored in `discobot_session` cookie (HttpOnly, 30 days)
 7. Session token is hashed (SHA256) before storage in DB
@@ -184,8 +182,8 @@ All API routes require authentication via session cookie (`discobot_session`) un
 
 | Method | Path | Description | Status |
 |--------|------|-------------|--------|
-| GET | `/auth/login/{provider}` | Initiate OAuth login (github, google) | ✅ |
-| GET | `/auth/callback/{provider}` | OAuth callback handler | ✅ |
+| GET | `/auth/login` | Initiate OIDC login | ✅ |
+| GET | `/auth/callback` | OIDC callback handler | ✅ |
 | POST | `/auth/logout` | Logout and clear session | ✅ |
 | GET | `/auth/me` | Get current user info | ✅ |
 

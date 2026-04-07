@@ -14,19 +14,29 @@ import (
 
 // ServerConfigResponse contains public server configuration for the frontend
 type ServerConfigResponse struct {
+<<<<<<< HEAD
 	SSHPort      int    `json:"ssh_port"`
 	HTTPPort     int    `json:"http_port"`
 	HTTPSPort    int    `json:"https_port,omitempty"`
 	HTTPSTLSMode string `json:"https_tls_mode,omitempty"`
+=======
+	SSHPort       int    `json:"ssh_port"`
+	PublicBaseURL string `json:"public_base_url"`
+>>>>>>> 79c521c3 (Add OIDC login to Discobot)
 }
 
 // GetServerConfig returns public server configuration
 func (h *Handler) GetServerConfig(w http.ResponseWriter, _ *http.Request) {
 	h.JSON(w, http.StatusOK, ServerConfigResponse{
+<<<<<<< HEAD
 		SSHPort:      h.cfg.SSHPort,
 		HTTPPort:     h.cfg.Port,
 		HTTPSPort:    h.cfg.HTTPSPort,
 		HTTPSTLSMode: h.cfg.HTTPSTLSMode,
+=======
+		SSHPort:       h.cfg.SSHPort,
+		PublicBaseURL: h.cfg.PublicBaseURL(),
+>>>>>>> 79c521c3 (Add OIDC login to Discobot)
 	})
 }
 

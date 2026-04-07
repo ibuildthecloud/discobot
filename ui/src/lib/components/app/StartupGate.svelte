@@ -3,7 +3,9 @@
 	import { fade } from "svelte/transition";
 	import { api } from "$lib/api-client";
 	import { initServerConfig, initTauriConfig } from "$lib/api-config";
-	import type { StartupTask } from "$lib/api-types";
+	import type { AuthUser, StartupTask } from "$lib/api-types";
+	import DiscobotBrand from "$lib/components/app/parts/DiscobotBrand.svelte";
+	import Button from "$lib/components/ui/button/button.svelte";
 	import StartupScreen, {
 		type StartupApiState,
 		type StartupScreenStep,
@@ -19,6 +21,7 @@
 	type StartupPhase =
 		| "initializing"
 		| "waiting"
+		| "auth"
 		| "loading"
 		| "ready"
 		| "error";
@@ -43,6 +46,11 @@
 	let ready = $state(false);
 	let errorMessage = $state<string | null>(null);
 	let startupPhase = $state<StartupPhase>("initializing");
+	let authenticatedUser = $state<AuthUser | null>(null);
+	const loginHref =
+		typeof window !== "undefined"
+			? api.getLoginUrl(window.location.href)
+			: api.getLoginUrl();
 	let retryCount = $state(0);
 	let startupTasks = $state<StartupTask[]>([]);
 	let startupOverlayDismissed = $state(false);
@@ -219,6 +227,20 @@
 			};
 		}
 
+		if (startupPhase === "auth") {
+			return {
+				headline: "Sign in to Discobot",
+				detail:
+					"The backend is ready, but you need to authenticate before the workspace shell can load.",
+				statusLabel: "Authentication required",
+				statusVariant: "outline",
+				progress: 100,
+				apiState: "online",
+				retryCount,
+				steps,
+			};
+		}
+
 		if (startupPhase === "loading") {
 			return {
 				headline: "Loading the workspace shell",
@@ -320,6 +342,11 @@
 				}
 
 				errorMessage = null;
+				authenticatedUser = await api.getCurrentUser();
+				if (!authenticatedUser) {
+					startupPhase = "auth";
+					return;
+				}
 				startupPhase = "loading";
 				await initServerConfig();
 				await app.refresh();
@@ -363,14 +390,35 @@
 </script>
 
 <div
-	class={ready
+	class={ready && startupPhase !== "auth"
 		? "transition-opacity duration-200 opacity-100"
 		: "pointer-events-none select-none transition-opacity duration-200 opacity-0"}
 >
 	{@render children?.()}
 </div>
 
-{#if !ready}
+{#if startupPhase === "auth"}
+	<div
+		class="fixed inset-0 z-50 flex items-center justify-center bg-background/95 px-6 py-10 text-foreground backdrop-blur-sm"
+	>
+		<div
+			class="w-full max-w-md rounded-2xl border border-border bg-card p-8 text-center shadow-sm"
+		>
+			<div class="mb-5 flex justify-center">
+				<DiscobotBrand heightClass="h-8" />
+			</div>
+			<h1 class="mb-2 font-semibold text-2xl text-foreground">
+				Sign in required
+			</h1>
+			<p class="mb-6 text-muted-foreground text-sm leading-6">
+				Sign in to continue to your Discobot workspace.
+			</p>
+			<div class="flex justify-center">
+				<Button href={loginHref} size="lg">Sign in</Button>
+			</div>
+		</div>
+	</div>
+{:else if !ready}
 	<div
 		in:fade={{ duration: STARTUP_SCREEN_FADE_MS }}
 		out:fade={{ duration: STARTUP_SCREEN_FADE_MS }}

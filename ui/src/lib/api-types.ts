@@ -535,11 +535,20 @@ export interface StatusMessage {
 	message: string;
 }
 
+export interface AuthUser {
+	id: string;
+	email: string;
+	name: string;
+	avatarUrl?: string;
+	provider: string;
+}
+
 export interface ServerConfig {
 	ssh_port: number;
 	http_port?: number;
 	https_port?: number;
 	https_tls_mode?: "ephemeral" | "static" | "acme";
+	public_base_url: string;
 }
 
 export interface SystemStatusResponse {

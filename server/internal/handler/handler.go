@@ -18,8 +18,11 @@ import (
 )
 
 const (
-	sessionCookieName = "discobot_session"
-	stateCookieName   = "discobot_oauth_state"
+	sessionCookieName      = "discobot_session"
+	stateCookieName        = "discobot_oauth_state"
+	nonceCookieName        = "discobot_oidc_nonce"
+	pkceVerifierCookieName = "discobot_oidc_pkce_verifier"
+	returnToCookieName     = "discobot_oidc_return_to"
 )
 
 // Handler contains all HTTP handlers
@@ -198,8 +201,8 @@ func (h *Handler) setSessionCookie(w http.ResponseWriter, token string) {
 		Value:    token,
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   false, // Set to true in production with HTTPS
-		SameSite: http.SameSiteLaxMode,
+		Secure:   h.cfg.CookiesSecure(),
+		SameSite: h.cfg.CookieSameSite(),
 		MaxAge:   30 * 24 * 60 * 60, // 30 days
 	})
 }
@@ -211,6 +214,7 @@ func (h *Handler) clearSessionCookie(w http.ResponseWriter) {
 		Value:    "",
 		Path:     "/",
 		HttpOnly: true,
+		Secure:   h.cfg.CookiesSecure(),
 		MaxAge:   -1,
 	})
 }
@@ -231,8 +235,8 @@ func (h *Handler) setStateCookie(w http.ResponseWriter, state string) {
 		Value:    state,
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   false,
-		SameSite: http.SameSiteLaxMode,
+		Secure:   h.cfg.CookiesSecure(),
+		SameSite: h.cfg.CookieSameSite(),
 		MaxAge:   10 * 60, // 10 minutes
 	})
 }
@@ -249,6 +253,97 @@ func (h *Handler) getStateCookie(w http.ResponseWriter, r *http.Request) string 
 		Value:    "",
 		Path:     "/",
 		HttpOnly: true,
+		Secure:   h.cfg.CookiesSecure(),
+		MaxAge:   -1,
+	})
+	return cookie.Value
+}
+
+// setNonceCookie sets the OIDC nonce cookie.
+func (h *Handler) setNonceCookie(w http.ResponseWriter, nonce string) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     nonceCookieName,
+		Value:    nonce,
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   h.cfg.CookiesSecure(),
+		SameSite: h.cfg.CookieSameSite(),
+		MaxAge:   10 * 60,
+	})
+}
+
+// getNonceCookie gets and clears the OIDC nonce cookie.
+func (h *Handler) getNonceCookie(w http.ResponseWriter, r *http.Request) string {
+	cookie, err := r.Cookie(nonceCookieName)
+	if err != nil {
+		return ""
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     nonceCookieName,
+		Value:    "",
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   h.cfg.CookiesSecure(),
+		MaxAge:   -1,
+	})
+	return cookie.Value
+}
+
+// setPKCEVerifierCookie sets the OIDC PKCE verifier cookie.
+func (h *Handler) setPKCEVerifierCookie(w http.ResponseWriter, verifier string) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     pkceVerifierCookieName,
+		Value:    verifier,
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   h.cfg.CookiesSecure(),
+		SameSite: h.cfg.CookieSameSite(),
+		MaxAge:   10 * 60,
+	})
+}
+
+// getPKCEVerifierCookie gets and clears the OIDC PKCE verifier cookie.
+func (h *Handler) getPKCEVerifierCookie(w http.ResponseWriter, r *http.Request) string {
+	cookie, err := r.Cookie(pkceVerifierCookieName)
+	if err != nil {
+		return ""
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     pkceVerifierCookieName,
+		Value:    "",
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   h.cfg.CookiesSecure(),
+		MaxAge:   -1,
+	})
+	return cookie.Value
+}
+
+// setReturnToCookie stores the UI return URL for the OIDC flow.
+func (h *Handler) setReturnToCookie(w http.ResponseWriter, returnTo string) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     returnToCookieName,
+		Value:    returnTo,
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   h.cfg.CookiesSecure(),
+		SameSite: h.cfg.CookieSameSite(),
+		MaxAge:   10 * 60,
+	})
+}
+
+// getReturnToCookie gets and clears the OIDC return URL cookie.
+func (h *Handler) getReturnToCookie(w http.ResponseWriter, r *http.Request) string {
+	cookie, err := r.Cookie(returnToCookieName)
+	if err != nil {
+		return ""
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     returnToCookieName,
+		Value:    "",
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   h.cfg.CookiesSecure(),
 		MaxAge:   -1,
 	})
 	return cookie.Value

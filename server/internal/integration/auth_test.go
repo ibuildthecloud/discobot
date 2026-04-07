@@ -58,18 +58,17 @@ func TestAuthLogout(t *testing.T) {
 	}
 }
 
-func TestAuthLogin_UnsupportedProvider(t *testing.T) {
+func TestAuthLogin_OIDCNotConfigured(t *testing.T) {
 	t.Parallel()
 	ts := NewTestServer(t)
 
 	client := ts.Client()
-	resp, err := client.Get(ts.Server.URL + "/auth/login/unsupported")
+	resp, err := client.Get(ts.Server.URL + "/auth/login")
 	if err != nil {
-		t.Fatalf("Failed to call auth login: %v", err)
+		t.Fatalf("Failed to call OIDC auth login: %v", err)
 	}
 	defer resp.Body.Close()
 
-	// Should return error for unsupported provider
 	AssertStatus(t, resp, http.StatusBadRequest)
 }
 

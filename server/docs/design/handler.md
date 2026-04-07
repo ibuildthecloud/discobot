@@ -64,8 +64,8 @@ func (h *Handler) PathParam(r *http.Request, key string) string
 func (h *Handler) RegisterRoutes(r chi.Router) {
     // Public routes
     r.Get("/api/status", h.GetStatus)
-    r.Get("/auth/login/{provider}", h.Login)
-    r.Get("/auth/callback/{provider}", h.Callback)
+    r.Get("/auth/login", h.Login)
+    r.Get("/auth/callback", h.Callback)
 
     // Protected routes
     r.Group(func(r chi.Router) {
@@ -114,13 +114,13 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 ### Authentication Handlers (auth.go)
 
 ```go
-// GET /auth/login/{provider}
+// GET /auth/login
 func (h *Handler) Login(w http.ResponseWriter, r *http.Request)
-// Initiates OAuth flow, redirects to provider
+// Initiates OIDC flow, redirects to provider
 
-// GET /auth/callback/{provider}
+// GET /auth/callback
 func (h *Handler) Callback(w http.ResponseWriter, r *http.Request)
-// Handles OAuth callback, creates session
+// Handles OIDC callback, creates session
 
 // POST /auth/logout
 func (h *Handler) Logout(w http.ResponseWriter, r *http.Request)

@@ -408,6 +408,7 @@ func (p *UserPreference) BeforeCreate(_ *gorm.DB) error {
 	return nil
 }
 
+<<<<<<< HEAD
 // TLSCacheEntry stores encrypted TLS state blobs, such as ACME/autocert cache data.
 type TLSCacheEntry struct {
 	ID            string    `gorm:"primaryKey;type:text" json:"id"`
@@ -422,6 +423,48 @@ func (TLSCacheEntry) TableName() string { return "tls_cache_entries" }
 func (e *TLSCacheEntry) BeforeCreate(_ *gorm.DB) error {
 	if e.ID == "" {
 		e.ID = uuid.New().String()
+=======
+// OIDCClientRegistration stores a dynamically registered OIDC client for a
+// specific issuer and Discobot public base URL.
+type OIDCClientRegistration struct {
+	ID                        string    `gorm:"primaryKey;type:text" json:"id"`
+	IssuerURL                 string    `gorm:"column:issuer_url;not null;type:text;uniqueIndex:idx_oidc_registration" json:"issuer_url"`
+	RedirectBaseURL           string    `gorm:"column:redirect_base_url;not null;type:text;uniqueIndex:idx_oidc_registration" json:"redirect_base_url"`
+	ClientID                  string    `gorm:"column:client_id;not null;type:text" json:"client_id"`
+	ClientSecretEncryptedData []byte    `gorm:"column:client_secret_encrypted_data" json:"-"`
+	TokenEndpointAuthMethod   *string   `gorm:"column:token_endpoint_auth_method;type:text" json:"token_endpoint_auth_method,omitempty"`
+	RegistrationClientURI     *string   `gorm:"column:registration_client_uri;type:text" json:"registration_client_uri,omitempty"`
+	RegistrationAccessToken   []byte    `gorm:"column:registration_access_token_encrypted_data" json:"-"`
+	ClientIDIssuedAt          *int64    `gorm:"column:client_id_issued_at" json:"client_id_issued_at,omitempty"`
+	ClientSecretExpiresAt     *int64    `gorm:"column:client_secret_expires_at" json:"client_secret_expires_at,omitempty"`
+	RegistrationResponseJSON  []byte    `gorm:"column:registration_response_json" json:"-"`
+	CreatedAt                 time.Time `gorm:"autoCreateTime" json:"created_at"`
+	UpdatedAt                 time.Time `gorm:"autoUpdateTime" json:"updated_at"`
+}
+
+func (OIDCClientRegistration) TableName() string { return "oidc_client_registrations" }
+
+func (r *OIDCClientRegistration) BeforeCreate(_ *gorm.DB) error {
+	if r.ID == "" {
+		r.ID = uuid.New().String()
+	}
+	return nil
+}
+
+// Installation stores instance-wide Discobot installation metadata.
+type Installation struct {
+	ID             string    `gorm:"primaryKey;type:text" json:"id"`
+	InstallationID string    `gorm:"column:installation_id;not null;type:text;uniqueIndex" json:"installation_id"`
+	CreatedAt      time.Time `gorm:"autoCreateTime" json:"created_at"`
+	UpdatedAt      time.Time `gorm:"autoUpdateTime" json:"updated_at"`
+}
+
+func (Installation) TableName() string { return "installations" }
+
+func (i *Installation) BeforeCreate(_ *gorm.DB) error {
+	if i.ID == "" {
+		i.ID = uuid.New().String()
+>>>>>>> 79c521c3 (Add OIDC login to Discobot)
 	}
 	return nil
 }
@@ -445,6 +488,11 @@ func AllModels() []interface{} {
 		&Job{},
 		&DispatcherLeader{},
 		&UserPreference{},
+<<<<<<< HEAD
 		&TLSCacheEntry{},
+=======
+		&OIDCClientRegistration{},
+		&Installation{},
+>>>>>>> 79c521c3 (Add OIDC login to Discobot)
 	}
 }

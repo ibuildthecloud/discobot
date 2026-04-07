@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/hex"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -55,8 +56,11 @@ type Config struct {
 	AuthEnabled bool // If false, uses anonymous user (default: false)
 
 	// Security
-	SessionSecret []byte
-	EncryptionKey []byte // 32 bytes for AES-256-GCM
+	EncryptionKey      []byte // 32 bytes for AES-256-GCM
+	AuthCookieSameSite string
+
+	// Public server address used in external redirects
+	PublicHostname string
 
 	// Workspaces and Git
 	WorkspaceDir string // Base directory for workspaces and git cache
@@ -103,11 +107,12 @@ type Config struct {
 	JobRetryBackoff                 time.Duration // Base backoff between job retries, multiplied by attempt number (default: 5s)
 	JobMaxAttempts                  int           // Default max attempts for jobs (default: 3)
 
-	// OAuth providers (for user login)
-	GitHubClientID     string
-	GitHubClientSecret string
-	GoogleClientID     string
-	GoogleClientSecret string
+	// OIDC provider (for Discobot login)
+	OIDCIssuerURL          string
+	OIDCBackchannelBaseURL string
+	OIDCClientID           string
+	OIDCClientSecret       string
+	OIDCScopes             []string
 
 	// AI Provider OAuth (client IDs are public for PKCE flows)
 	AnthropicClientID     string
@@ -177,17 +182,6 @@ func Load() (*Config, error) {
 	// Authentication - defaults to disabled (anonymous user mode)
 	cfg.AuthEnabled = getEnvBool("AUTH_ENABLED", false)
 
-	// Security - Session secret (required only if auth is enabled)
-	sessionSecret := getEnv("SESSION_SECRET", "")
-	if sessionSecret == "" {
-		if cfg.AuthEnabled {
-			return nil, fmt.Errorf("SESSION_SECRET is required when AUTH_ENABLED=true")
-		}
-		// Use a default for no-auth mode (sessions still work but aren't secure)
-		sessionSecret = "discobot-dev-session-secret-not-for-production"
-	}
-	cfg.SessionSecret = []byte(sessionSecret)
-
 	// Security - Encryption key (32 bytes for AES-256)
 	encryptionKeyStr := getEnv("ENCRYPTION_KEY", "")
 	if encryptionKeyStr == "" {
@@ -205,6 +199,10 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("ENCRYPTION_KEY must be exactly 32 bytes (64 hex chars), got %d bytes", len(encryptionKey))
 	}
 	cfg.EncryptionKey = encryptionKey
+	cfg.AuthCookieSameSite = strings.ToLower(getEnv("AUTH_COOKIE_SAMESITE", "lax"))
+
+	// Public address
+	cfg.PublicHostname = getEnv("PUBLIC_HOSTNAME", "")
 
 	// Workspaces and Git - defaults to XDG_DATA_HOME/discobot/workspaces
 	cfg.WorkspaceDir = getEnv("WORKSPACE_DIR", filepath.Join(xdg.DataHome, appName, "workspaces"))
@@ -255,11 +253,11 @@ func Load() (*Config, error) {
 	cfg.JobRetryBackoff = getEnvDuration("JOB_RETRY_BACKOFF", 5*time.Second)
 	cfg.JobMaxAttempts = getEnvInt("JOB_MAX_ATTEMPTS", 3)
 
-	// OAuth providers for user login
-	cfg.GitHubClientID = getEnv("GITHUB_CLIENT_ID", "")
-	cfg.GitHubClientSecret = getEnv("GITHUB_CLIENT_SECRET", "")
-	cfg.GoogleClientID = getEnv("GOOGLE_CLIENT_ID", "")
-	cfg.GoogleClientSecret = getEnv("GOOGLE_CLIENT_SECRET", "")
+	cfg.OIDCIssuerURL = getEnv("OIDC_ISSUER_URL", "")
+	cfg.OIDCBackchannelBaseURL = getEnv("OIDC_BACKCHANNEL_BASE_URL", "")
+	cfg.OIDCClientID = getEnv("OIDC_CLIENT_ID", "")
+	cfg.OIDCClientSecret = getEnv("OIDC_CLIENT_SECRET", "")
+	cfg.OIDCScopes = getEnvList("OIDC_SCOPES", []string{"openid", "email", "profile"})
 
 	// AI Provider OAuth client IDs (public, used in PKCE flows)
 	cfg.AnthropicClientID = getEnv("ANTHROPIC_CLIENT_ID", "9d1c250a-e61b-44d9-88ed-5944d1962f5e")
@@ -421,4 +419,67 @@ func getEnvDuration(key string, defaultValue time.Duration) time.Duration {
 		}
 	}
 	return defaultValue
+}
+
+// PublicBaseURL returns the externally visible base URL for this server.
+func (c *Config) PublicBaseURL() string {
+	host := strings.TrimSpace(c.PublicHostname)
+	if host == "" {
+		host = fmt.Sprintf("localhost:%d", c.Port)
+	}
+
+	host = strings.TrimRight(host, "/")
+	if strings.HasPrefix(host, "http://") || strings.HasPrefix(host, "https://") {
+		return host
+	}
+
+	if isLoopbackHost(host) {
+		return "http://" + host
+	}
+
+	return "https://" + host
+}
+
+// CookiesSecure reports whether auth cookies must be marked Secure.
+func (c *Config) CookiesSecure() bool {
+	return c.AuthCookieSameSite == "none" || strings.HasPrefix(c.PublicBaseURL(), "https://")
+}
+
+// OIDCBackchannelURL returns the server-to-server base URL for the configured OIDC provider.
+// If unset, it defaults to the public issuer URL.
+func (c *Config) OIDCBackchannelURL() string {
+	if strings.TrimSpace(c.OIDCBackchannelBaseURL) != "" {
+		return strings.TrimRight(strings.TrimSpace(c.OIDCBackchannelBaseURL), "/")
+	}
+	return strings.TrimRight(strings.TrimSpace(c.OIDCIssuerURL), "/")
+}
+
+func (c *Config) CookieSameSite() http.SameSite {
+	switch strings.ToLower(strings.TrimSpace(c.AuthCookieSameSite)) {
+	case "none":
+		return http.SameSiteNoneMode
+	case "strict":
+		return http.SameSiteStrictMode
+	case "lax", "":
+		return http.SameSiteLaxMode
+	default:
+		return http.SameSiteLaxMode
+	}
+}
+
+func isLoopbackHost(host string) bool {
+	host = strings.TrimSpace(host)
+	host = strings.TrimPrefix(host, "[")
+	host = strings.TrimSuffix(host, "]")
+
+	switch {
+	case strings.HasPrefix(host, "localhost"):
+		return true
+	case strings.HasPrefix(host, "127.0.0.1"):
+		return true
+	case strings.HasPrefix(host, "::1"):
+		return true
+	default:
+		return false
+	}
 }

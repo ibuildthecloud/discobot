@@ -109,8 +109,7 @@ func NewTestServer(t *testing.T) *TestServer {
 		CORSOrigins:    []string{"*"},
 		DatabaseDSN:    dsn,
 		DatabaseDriver: driver,
-		AuthEnabled:    true, // Enable auth for testing the full auth flow
-		SessionSecret:  []byte("test-session-secret-32-bytes-long!!"),
+		AuthEnabled:    true,                                       // Enable auth for testing the full auth flow
 		EncryptionKey:  []byte("01234567890123456789012345678901"), // 32 bytes
 		WorkspaceDir:   workspaceDir,
 	}
@@ -243,8 +242,8 @@ func setupRouter(s *store.Store, cfg *config.Config, h *handler.Handler) *chi.Mu
 
 	// Auth routes (no auth required)
 	r.Route("/auth", func(r chi.Router) {
-		r.Get("/login/{provider}", h.AuthLogin)
-		r.Get("/callback/{provider}", h.AuthCallback)
+		r.Get("/login", h.AuthLogin)
+		r.Get("/callback", h.AuthCallback)
 		r.Post("/logout", h.AuthLogout)
 		r.Get("/me", h.AuthMe)
 	})
@@ -391,7 +390,6 @@ func NewTestServerNoAuth(t *testing.T) *TestServer {
 		DatabaseDSN:    dsn,
 		DatabaseDriver: "sqlite",
 		AuthEnabled:    false, // Disable auth - use anonymous user
-		SessionSecret:  []byte("test-session-secret-32-bytes-long!!"),
 		EncryptionKey:  []byte("01234567890123456789012345678901"),
 		WorkspaceDir:   workspaceDir,
 	}
@@ -915,6 +913,7 @@ func cleanTables(db *database.DB) {
 		"project_invitations",
 		"project_members",
 		"projects",
+		"oidc_client_registrations",
 		"user_preferences",
 		"user_sessions",
 		"users",

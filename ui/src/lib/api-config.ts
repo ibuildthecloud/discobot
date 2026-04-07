@@ -77,6 +77,7 @@ export async function waitForApiReady(options?: {
 			const response = await fetch(
 				appendAuthToken(`${getApiRootBase()}/status`),
 				{
+					credentials: "include",
 					cache: "no-store",
 					signal,
 				},
@@ -203,6 +204,7 @@ export async function initServerConfig(): Promise<void> {
 	try {
 		const resp = await fetch(
 			appendAuthToken(`${getApiRootBase()}/server-config`),
+			{ credentials: "include" },
 		);
 		if (resp.ok) {
 			const config = await resp.json();

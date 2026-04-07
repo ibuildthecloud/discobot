@@ -397,6 +397,7 @@
 		logsConnected = false;
 		const source = new EventSource(
 			api.getServiceOutputUrl(sessionId, service.id),
+			{ withCredentials: true },
 		);
 
 		source.onopen = () => {

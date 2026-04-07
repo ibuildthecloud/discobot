@@ -62,6 +62,17 @@ func (s *Store) GetUserByProviderID(ctx context.Context, provider, providerID st
 	return &user, nil
 }
 
+func (s *Store) GetUserByEmail(ctx context.Context, email string) (*model.User, error) {
+	var user model.User
+	if err := s.readDB.WithContext(ctx).First(&user, "email = ?", email).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return &user, nil
+}
+
 func (s *Store) CreateUser(ctx context.Context, user *model.User) error {
 	return s.writeDB.WithContext(ctx).Create(user).Error
 }
@@ -93,6 +104,36 @@ func (s *Store) DeleteUserSession(ctx context.Context, tokenHash string) error {
 
 func (s *Store) DeleteExpiredUserSessions(ctx context.Context) error {
 	return s.writeDB.WithContext(ctx).Delete(&model.UserSession{}, "expires_at < ?", time.Now()).Error
+}
+
+func (s *Store) GetOIDCClientRegistration(ctx context.Context, issuerURL, redirectBaseURL string) (*model.OIDCClientRegistration, error) {
+	var registration model.OIDCClientRegistration
+	if err := s.readDB.WithContext(ctx).First(&registration, "issuer_url = ? AND redirect_base_url = ?", issuerURL, redirectBaseURL).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return &registration, nil
+}
+
+func (s *Store) CreateOIDCClientRegistration(ctx context.Context, registration *model.OIDCClientRegistration) error {
+	return s.writeDB.WithContext(ctx).Create(registration).Error
+}
+
+func (s *Store) GetInstallation(ctx context.Context) (*model.Installation, error) {
+	var installation model.Installation
+	if err := s.readDB.WithContext(ctx).First(&installation).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return &installation, nil
+}
+
+func (s *Store) CreateInstallation(ctx context.Context, installation *model.Installation) error {
+	return s.writeDB.WithContext(ctx).Create(installation).Error
 }
 
 // --- Projects ---

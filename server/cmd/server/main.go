@@ -440,21 +440,20 @@ func main() {
 		authReg := reg.WithPrefix("/auth")
 
 		authReg.Register(r, routes.Route{
-			Method: "GET", Pattern: "/login/{provider}",
+			Method: "GET", Pattern: "/login",
 			Handler: h.AuthLogin,
 			Meta: routes.Meta{
 				Group:       "Auth",
-				Description: "Start OAuth login",
-				Params:      []routes.Param{{Name: "provider", Example: "github"}},
+				Description: "Start OIDC login",
 			},
 		})
 
 		authReg.Register(r, routes.Route{
-			Method: "GET", Pattern: "/callback/{provider}",
+			Method: "GET", Pattern: "/callback",
 			Handler: h.AuthCallback,
 			Meta: routes.Meta{
 				Group:       "Auth",
-				Description: "OAuth callback",
+				Description: "OIDC callback",
 				Params:      []routes.Param{{Name: "code", In: "query"}, {Name: "state", In: "query"}},
 			},
 		})

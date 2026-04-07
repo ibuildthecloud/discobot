@@ -3,22 +3,22 @@ package handler
 import (
 	"fmt"
 	"net/http"
+	"net/url"
+	"strings"
 
-	"github.com/go-chi/chi/v5"
+	"golang.org/x/oauth2"
 
 	"github.com/obot-platform/discobot/server/internal/model"
 	"github.com/obot-platform/discobot/server/internal/service"
 )
 
-// AuthLogin handles OAuth login redirect
+// AuthLogin handles OIDC login redirect
 func (h *Handler) AuthLogin(w http.ResponseWriter, r *http.Request) {
 	// If auth is disabled, redirect to home
 	if !h.cfg.AuthEnabled {
 		http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
 		return
 	}
-
-	provider := chi.URLParam(r, "provider")
 
 	// Generate state for CSRF protection
 	state, err := service.GenerateState()
@@ -29,16 +29,24 @@ func (h *Handler) AuthLogin(w http.ResponseWriter, r *http.Request) {
 
 	// Store state in cookie
 	h.setStateCookie(w, state)
+	if returnTo := h.sanitizeReturnTo(r.URL.Query().Get("return_to")); returnTo != "" {
+		h.setReturnToCookie(w, returnTo)
+	}
 
 	// Build redirect URL
-	scheme := "http"
-	if r.TLS != nil {
-		scheme = "https"
-	}
-	redirectURL := fmt.Sprintf("%s://%s/auth/callback/%s", scheme, r.Host, provider)
+	redirectURL := h.cfg.PublicBaseURL() + "/auth/callback"
 
-	// Get authorization URL
-	authURL, err := h.authService.GetAuthURL(provider, redirectURL, state)
+	var authURL string
+	nonce, nonceErr := service.GenerateState()
+	if nonceErr != nil {
+		h.Error(w, http.StatusInternalServerError, "Failed to generate nonce")
+		return
+	}
+	verifier := oauth2.GenerateVerifier()
+	challenge := oauth2.S256ChallengeFromVerifier(verifier)
+	h.setNonceCookie(w, nonce)
+	h.setPKCEVerifierCookie(w, verifier)
+	authURL, err = h.authService.GetOIDCAuthURL(r.Context(), redirectURL, state, nonce, challenge)
 	if err != nil {
 		h.Error(w, http.StatusBadRequest, err.Error())
 		return
@@ -47,15 +55,13 @@ func (h *Handler) AuthLogin(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, authURL, http.StatusTemporaryRedirect)
 }
 
-// AuthCallback handles OAuth callback
+// AuthCallback handles OIDC callback
 func (h *Handler) AuthCallback(w http.ResponseWriter, r *http.Request) {
 	// If auth is disabled, redirect to home
 	if !h.cfg.AuthEnabled {
 		http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
 		return
 	}
-
-	provider := chi.URLParam(r, "provider")
 
 	// Verify state
 	state := r.URL.Query().Get("state")
@@ -80,14 +86,19 @@ func (h *Handler) AuthCallback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Build redirect URL (must match the one used in login)
-	scheme := "http"
-	if r.TLS != nil {
-		scheme = "https"
-	}
-	redirectURL := fmt.Sprintf("%s://%s/auth/callback/%s", scheme, r.Host, provider)
+	redirectURL := h.cfg.PublicBaseURL() + "/auth/callback"
 
-	// Exchange code for user info
-	providerUser, err := h.authService.ExchangeCode(r.Context(), provider, redirectURL, code)
+	var (
+		providerUser *service.User
+		err          error
+	)
+	nonce := h.getNonceCookie(w, r)
+	verifier := h.getPKCEVerifierCookie(w, r)
+	if nonce == "" || verifier == "" {
+		h.Error(w, http.StatusBadRequest, "Missing OIDC login state")
+		return
+	}
+	providerUser, err = h.authService.ExchangeOIDCCode(r.Context(), redirectURL, code, nonce, verifier)
 	if err != nil {
 		h.Error(w, http.StatusInternalServerError, fmt.Sprintf("Failed to exchange code: %v", err))
 		return
@@ -110,8 +121,60 @@ func (h *Handler) AuthCallback(w http.ResponseWriter, r *http.Request) {
 	// Set session cookie
 	h.setSessionCookie(w, token)
 
+	returnTo := h.sanitizeReturnTo(h.getReturnToCookie(w, r))
+	if returnTo == "" {
+		returnTo = "/"
+	}
+
 	// Redirect to frontend
-	http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
+	http.Redirect(w, r, returnTo, http.StatusTemporaryRedirect)
+}
+
+// sanitizeReturnTo restricts post-login redirects to relative paths or allowed same-origin UI URLs.
+func (h *Handler) sanitizeReturnTo(returnTo string) string {
+	trimmed := strings.TrimSpace(returnTo)
+	if trimmed == "" {
+		return ""
+	}
+
+	parsed, err := url.Parse(trimmed)
+	if err != nil {
+		return ""
+	}
+
+	if !parsed.IsAbs() {
+		if strings.HasPrefix(trimmed, "//") || !strings.HasPrefix(trimmed, "/") {
+			return ""
+		}
+		return trimmed
+	}
+
+	publicURL, err := url.Parse(h.cfg.PublicBaseURL())
+	if err != nil || publicURL.Host == "" {
+		return ""
+	}
+
+	if !sameOriginUIHost(parsed.Host, publicURL.Host) {
+		return ""
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return ""
+	}
+	return parsed.String()
+}
+
+func sameOriginUIHost(returnToHost, publicHost string) bool {
+	returnToHost = strings.ToLower(returnToHost)
+	publicHost = strings.ToLower(publicHost)
+	if returnToHost == publicHost {
+		return true
+	}
+	uiHost := strings.Replace(publicHost, "-svc-api.", "-svc-ui.", 1)
+	if returnToHost == uiHost {
+		return true
+	}
+	uiSvelteHost := strings.Replace(publicHost, "-svc-api.", "-svc-ui-svelte.", 1)
+	return returnToHost == uiSvelteHost
 }
 
 // AuthLogout handles user logout
