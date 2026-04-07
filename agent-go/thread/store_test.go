@@ -536,6 +536,38 @@ func TestSaveAndLoadTurnState(t *testing.T) {
 	}
 }
 
+func TestLoadTurnState_IgnoresCorruptActiveTurnState(t *testing.T) {
+	store := NewStore(t.TempDir())
+	threadID := "thread1"
+
+	if err := store.SaveTurnState(threadID, TurnState{ID: "turn1", ThreadID: threadID, Phase: PhaseStreaming}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(store.turnStatePath(threadID), []byte(`{"id":"turn1"`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := store.LoadTurnState(threadID)
+	if err != nil {
+		t.Fatalf("expected corrupt active turn state to be ignored, got %v", err)
+	}
+	if loaded != nil {
+		t.Fatalf("expected nil turn state after corrupt file, got %#v", loaded)
+	}
+
+	record, err := store.LoadTurnRecord(threadID, "turn1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if record == nil {
+		t.Fatal("expected durable turn record to remain readable")
+	}
+	if record.ID != "turn1" {
+		t.Fatalf("expected durable turn record ID turn1, got %s", record.ID)
+	}
+}
+
 func TestLoadTurnState_NoActiveTurn(t *testing.T) {
 	store := NewStore(t.TempDir())
 	state, err := store.LoadTurnState("thread1")

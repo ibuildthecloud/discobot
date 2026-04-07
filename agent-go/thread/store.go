@@ -334,7 +334,7 @@ func (s *Store) SaveTurnState(threadID string, state TurnState) error {
 }
 
 // LoadTurnState loads the active turn state from disk.
-// Returns nil if no active turn exists.
+// Returns nil if no active turn exists or the state file is truncated/corrupt.
 func (s *Store) LoadTurnState(threadID string) (*TurnState, error) {
 	data, err := os.ReadFile(s.turnStatePath(threadID))
 	if err != nil {
@@ -345,7 +345,8 @@ func (s *Store) LoadTurnState(threadID string) (*TurnState, error) {
 	}
 	var state TurnState
 	if err := json.Unmarshal(data, &state); err != nil {
-		return nil, fmt.Errorf("unmarshal turn state: %w", err)
+		log.Printf("thread store: ignoring corrupt turn state for thread %s: %v", threadID, err)
+		return nil, nil
 	}
 	return &state, nil
 }
