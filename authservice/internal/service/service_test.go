@@ -76,5 +76,5 @@ func newTestService(t *testing.T) *Service {
 		AuthorizationCodeTTL: 5 * time.Minute,
 		AccessTokenTTL:       15 * time.Minute,
 	}
-	return New(store.New(db), cfg)
+	return New(store.New(db, nil), cfg)
 }

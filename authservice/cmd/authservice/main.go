@@ -25,10 +25,15 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to open database: %v", err)
 	}
+	defer func() {
+		if err := db.Close(); err != nil {
+			log.Printf("failed to close database: %v", err)
+		}
+	}()
 	if err := db.Migrate(); err != nil {
 		log.Fatalf("failed to migrate database: %v", err)
 	}
-	st := store.New(db.DB)
+	st := store.New(db.DB, db.ReadDB)
 	svc := service.New(st, cfg)
 	h := handler.New(cfg, svc)
 	addr := ":" + httpPort(cfg.Port)
