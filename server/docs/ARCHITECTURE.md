@@ -388,13 +388,24 @@ Key environment variables:
 | Variable | Description |
 |----------|-------------|
 | `PORT` | Server port (default: 3001) |
+| `HTTPS_PORT` | Optional HTTPS listener port |
+| `HTTPS_TLS_MODE` | HTTPS certificate mode: `ephemeral`, `static`, or `acme` |
+| `HTTPS_TLS_HOSTS` | HTTPS SANs / ACME host allowlist |
+| `HTTPS_TLS_CERT_FILE` | Static TLS certificate path |
+| `HTTPS_TLS_KEY_FILE` | Static TLS private key path |
+| `HTTPS_ACME_EMAIL` | Optional ACME contact email |
+| `CORS_ORIGINS` | Allowed browser origins; supports `{HTTP_PORT}` and `{HTTPS_PORT}` placeholders |
 | `DATABASE_DSN` | Database connection string |
 | `WORKSPACE_DIR` | Base directory for workspaces |
 | `SANDBOX_IMAGE` | Default sandbox image |
 | `AUTH_ENABLED` | Enable authentication |
 | `ENCRYPTION_KEY` | AES-256 key for credentials |
 
-During process startup, the server probes its configured API port before doing the rest of initialization. It retries the bind check every 10 seconds for up to 2 minutes, closes the temporary listener as soon as the port becomes available, and then proceeds with normal startup.
+If `HTTPS_PORT` is configured, the server runs a second TLS listener alongside the existing HTTP listener. TLS can be backed by an ephemeral self-signed certificate, a configured static cert/key pair, or ACME/autocert. ACME cache entries are persisted in the database and encrypted with the server encryption key. For trusted HTTPS modes (`static` and `acme`), the HTTP listener redirects regular traffic to HTTPS while still allowing ACME HTTP challenge handling.
+
+CORS defaults are derived from the configured API listener ports instead of hardcoding `:3001`. Custom `CORS_ORIGINS` values can include `{HTTP_PORT}` and `{HTTPS_PORT}` placeholders so callers do not need to duplicate the actual bound ports in multiple settings.
+
+During process startup, the server probes each configured listener port before doing the rest of initialization. It retries the bind check every 10 seconds for up to 2 minutes, closes the temporary listener as soon as the port becomes available, and then proceeds with normal startup.
 
 ## Testing
 

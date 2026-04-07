@@ -35,6 +35,7 @@ import (
 	"github.com/obot-platform/discobot/server/internal/ssh"
 	"github.com/obot-platform/discobot/server/internal/startup"
 	"github.com/obot-platform/discobot/server/internal/store"
+	"github.com/obot-platform/discobot/server/internal/tlsconfig"
 	"github.com/obot-platform/discobot/server/internal/version"
 	"github.com/obot-platform/discobot/server/static"
 )
@@ -64,6 +65,12 @@ func main() {
 	apiAddr := fmt.Sprintf(":%d", cfg.Port)
 	if err := startup.WaitForTCPBind(context.Background(), apiAddr); err != nil {
 		log.Fatalf("Failed waiting for API port %s: %v", apiAddr, err)
+	}
+	httpsAddr := fmt.Sprintf(":%d", cfg.HTTPSPort)
+	if cfg.HTTPSPort > 0 {
+		if err := startup.WaitForTCPBind(context.Background(), httpsAddr); err != nil {
+			log.Fatalf("Failed waiting for HTTPS port %s: %v", httpsAddr, err)
+		}
 	}
 
 	// Log version
@@ -97,6 +104,11 @@ func main() {
 
 	// Create store with separate read/write pools for SQLite
 	s := store.New(db.DB, db.ReadDB)
+
+	httpsSetup, err := tlsconfig.Load(cfg, s)
+	if err != nil {
+		log.Fatalf("Failed to initialize HTTPS configuration: %v", err)
+	}
 
 	// Initialize git provider (required)
 	// Create workspace source for git provider to lookup workspace info
@@ -1560,11 +1572,27 @@ func main() {
 		}
 	}
 
+	httpHandler := http.Handler(r)
+	if httpsSetup != nil && httpsSetup.RedirectHTTP {
+		httpHandler = tlsconfig.RedirectHTTPToHTTPS(cfg, httpHandler)
+	}
+	if httpsSetup != nil && httpsSetup.WrapHTTPHandler != nil {
+		httpHandler = httpsSetup.WrapHTTPHandler(httpHandler)
+	}
+
 	// Create server
 	// Note: No timeouts set - SSE endpoints need long-lived connections
 	srv := &http.Server{
 		Addr:    apiAddr,
-		Handler: r,
+		Handler: httpHandler,
+	}
+	var httpsSrv *http.Server
+	if httpsSetup != nil {
+		httpsSrv = &http.Server{
+			Addr:      httpsAddr,
+			Handler:   r,
+			TLSConfig: httpsSetup.TLSConfig,
+		}
 	}
 
 	// Start server in a goroutine
@@ -1574,6 +1602,14 @@ func main() {
 			log.Fatalf("Server failed: %v", err)
 		}
 	}()
+	if httpsSrv != nil {
+		go func() {
+			log.Printf("HTTPS server starting on port %d (%s TLS)", cfg.HTTPSPort, httpsSetup.Mode)
+			if err := httpsSrv.ListenAndServeTLS("", ""); err != nil && err != http.ErrServerClosed {
+				log.Fatalf("HTTPS server failed: %v", err)
+			}
+		}()
+	}
 
 	// Wait for interrupt signal or stdin close
 	quit := make(chan os.Signal, 1)
@@ -1658,6 +1694,11 @@ func main() {
 	// the server can finish its shutdown sequence before we stop serving requests.
 	httpShutdownCtx, httpShutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer httpShutdownCancel()
+	if httpsSrv != nil {
+		if err := httpsSrv.Shutdown(httpShutdownCtx); err != nil {
+			log.Fatalf("HTTPS server forced to shutdown: %v", err)
+		}
+	}
 	if err := srv.Shutdown(httpShutdownCtx); err != nil {
 		log.Fatalf("Server forced to shutdown: %v", err)
 	}

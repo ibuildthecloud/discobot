@@ -82,6 +82,13 @@ golangci-lint run
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PORT` | `3001` | HTTP server port |
+| `HTTPS_PORT` | disabled | Optional HTTPS server port |
+| `HTTPS_TLS_MODE` | `ephemeral` | HTTPS certificate mode: `ephemeral`, `static`, or `acme` |
+| `HTTPS_TLS_HOSTS` | `localhost` | Comma-separated hostnames/IPs for ephemeral cert SANs and ACME host allowlist |
+| `HTTPS_TLS_CERT_FILE` | — | PEM certificate path when `HTTPS_TLS_MODE=static` |
+| `HTTPS_TLS_KEY_FILE` | — | PEM private key path when `HTTPS_TLS_MODE=static` |
+| `HTTPS_ACME_EMAIL` | — | Optional ACME contact email when `HTTPS_TLS_MODE=acme` |
+| `CORS_ORIGINS` | computed | Comma-separated allowed origins; supports `{HTTP_PORT}` and `{HTTPS_PORT}` placeholders |
 | `DATABASE_DSN` | `discobot.db` | Database connection string |
 | `AUTH_ENABLED` | `false` | Enable authentication |
 | `WORKSPACE_DIR` | `/tmp/workspaces` | Base directory for workspaces |
@@ -89,7 +96,13 @@ golangci-lint run
 | `CACHE_ENABLED` | `true` | Enable project-scoped cache volumes |
 | `ENCRYPTION_KEY` | (required) | Key for credential encryption |
 
-On startup, the server first waits until its API port can be bound. It probes the configured `PORT` every 10 seconds for up to 2 minutes, immediately releases the probe listener on success, and only then continues with the normal startup sequence. This avoids restart races with a previous process that is still shutting down.
+When `HTTPS_PORT` is enabled, the server starts both HTTP and HTTPS listeners. In `ephemeral` mode it generates an in-memory self-signed certificate at startup. In `static` mode it loads the configured PEM cert/key pair. In `acme` mode it uses Go's `autocert` support and stores cached ACME state in the database encrypted with `ENCRYPTION_KEY`.
+
+For trusted HTTPS modes (`static` and `acme`), the HTTP listener redirects normal traffic to the HTTPS listener. In `acme` mode, Go's autocert HTTP challenge paths are still served on the HTTP listener so certificate issuance and renewal continue to work.
+
+By default, CORS origins are generated from the configured API listener ports. That includes the active HTTP API origin (`http://localhost:{PORT}` and `http://*.localhost:{PORT}`), the active HTTPS API origin when enabled (`https://localhost:{HTTPS_PORT}` and `https://*.localhost:{HTTPS_PORT}`), plus the local frontend dev origins on ports `3000` and `3100`. If you set `CORS_ORIGINS` explicitly, you can still use `{HTTP_PORT}` and `{HTTPS_PORT}` placeholders in the value.
+
+On startup, the server first waits until each configured listener port can be bound. It probes `PORT` and `HTTPS_PORT` every 10 seconds for up to 2 minutes, immediately releases the probe listener on success, and only then continues with the normal startup sequence. This avoids restart races with a previous process that is still shutting down.
 
 ### Building
 

@@ -2,7 +2,7 @@
 	import { onMount } from "svelte";
 	import { fade } from "svelte/transition";
 	import { api } from "$lib/api-client";
-	import { initTauriConfig } from "$lib/api-config";
+	import { initServerConfig, initTauriConfig } from "$lib/api-config";
 	import type { StartupTask } from "$lib/api-types";
 	import StartupScreen, {
 		type StartupApiState,
@@ -321,6 +321,7 @@
 
 				errorMessage = null;
 				startupPhase = "loading";
+				await initServerConfig();
 				await app.refresh();
 				startupTasks = app.startup.tasks;
 				stopProjectEvents = app.connectProjectEvents();

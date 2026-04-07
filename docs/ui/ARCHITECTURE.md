@@ -100,7 +100,7 @@ All server data is managed through SWR hooks in `lib/hooks/`. This provides:
 
 ### 3. Vite Dev Server Proxy to Go Backend
 
-API calls go to `/api/*` which Vite's dev server proxies to the Go backend at `localhost:3001`. This allows the frontend to use relative URLs while the backend handles business logic.
+API calls go to `/api/*` which Vite's dev server proxies to the Go backend at `localhost:3001`. This allows the frontend to use relative URLs while the backend handles business logic. Outside the dev proxy, the active Svelte UI uses `ui/src/lib/api-config.ts` to discover `/api/server-config` and prefer the server's HTTPS listener for browser traffic when trusted HTTPS is available, while Tauri continues using its direct local HTTP connection.
 
 ### 4. Server-Sent Events for Real-time Updates
 

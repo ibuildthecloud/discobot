@@ -2,6 +2,7 @@
 export const PROJECT_ID = "local";
 
 const DEFAULT_SSH_PORT = 3333;
+const DEFAULT_HTTP_PORT = 3001;
 const API_READY_POLL_INTERVAL_MS = 1000;
 const tauriLocalhost = "localhost";
 
@@ -11,6 +12,11 @@ let tauriInitialized = false;
 
 // Server config (fetched from backend)
 let sshPort = DEFAULT_SSH_PORT;
+let serverConfig: {
+	httpPort: number;
+	httpsPort: number | null;
+	httpsTLSMode: "ephemeral" | "static" | "acme" | null;
+} | null = null;
 
 /**
  * Initialize Tauri server config (port and secret).
@@ -147,7 +153,11 @@ export function getApiRootBase() {
 	if (svcUiHostToken) {
 		const apiHostname = hostname.replace(svcUiHostToken, "-svc-api.");
 		const protocol = window.location.protocol;
-		const port = window.location.port;
+		const preferred = getPreferredBrowserAPIOrigin();
+		const port =
+			protocol === "https:"
+				? (preferred?.port ?? window.location.port)
+				: window.location.port;
 		const apiHost = port ? `${apiHostname}:${port}` : apiHostname;
 		return `${protocol}//${apiHost}/api`;
 	}
@@ -157,7 +167,12 @@ export function getApiRootBase() {
 		return `http://${tauriLocalhost}:${tauriServerConfig.port}/api`;
 	}
 
-	return "http://localhost:3001/api";
+	const preferred = getPreferredBrowserAPIOrigin();
+	if (preferred) {
+		return `${preferred.protocol}//${window.location.hostname}:${preferred.port}/api`;
+	}
+
+	return `http://localhost:${DEFAULT_HTTP_PORT}/api`;
 }
 
 /**
@@ -194,6 +209,22 @@ export async function initServerConfig(): Promise<void> {
 			if (typeof config.ssh_port === "number" && config.ssh_port > 0) {
 				sshPort = config.ssh_port;
 			}
+			serverConfig = {
+				httpPort:
+					typeof config.http_port === "number" && config.http_port > 0
+						? config.http_port
+						: DEFAULT_HTTP_PORT,
+				httpsPort:
+					typeof config.https_port === "number" && config.https_port > 0
+						? config.https_port
+						: null,
+				httpsTLSMode:
+					config.https_tls_mode === "ephemeral" ||
+					config.https_tls_mode === "static" ||
+					config.https_tls_mode === "acme"
+						? config.https_tls_mode
+						: null,
+			};
 		}
 	} catch {
 		// Fall back to default SSH port
@@ -205,4 +236,23 @@ export async function initServerConfig(): Promise<void> {
  */
 export function getSSHPort(): number {
 	return sshPort;
+}
+
+function getPreferredBrowserAPIOrigin(): {
+	protocol: "https:";
+	port: string;
+} | null {
+	if (typeof window === "undefined" || isTauri() || !serverConfig?.httpsPort) {
+		return null;
+	}
+	if (window.location.protocol === "https:") {
+		return { protocol: "https:", port: String(serverConfig.httpsPort) };
+	}
+	if (
+		serverConfig.httpsTLSMode === "static" ||
+		serverConfig.httpsTLSMode === "acme"
+	) {
+		return { protocol: "https:", port: String(serverConfig.httpsPort) };
+	}
+	return null;
 }

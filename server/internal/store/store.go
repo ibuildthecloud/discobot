@@ -496,6 +496,38 @@ func (s *Store) GetSessionCredentialAssignment(ctx context.Context, sessionID, c
 	return &assignment, nil
 }
 
+// --- TLS Cache ---
+
+func (s *Store) GetTLSCacheEntry(ctx context.Context, cacheKey string) (*model.TLSCacheEntry, error) {
+	var entry model.TLSCacheEntry
+	if err := s.readDB.WithContext(ctx).First(&entry, "cache_key = ?", cacheKey).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return &entry, nil
+}
+
+func (s *Store) PutTLSCacheEntry(ctx context.Context, cacheKey string, encryptedData []byte) error {
+	existing, err := s.GetTLSCacheEntry(ctx, cacheKey)
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return err
+	}
+	if existing != nil {
+		existing.EncryptedData = encryptedData
+		return s.writeDB.WithContext(ctx).Save(existing).Error
+	}
+	return s.writeDB.WithContext(ctx).Create(&model.TLSCacheEntry{
+		CacheKey:      cacheKey,
+		EncryptedData: encryptedData,
+	}).Error
+}
+
+func (s *Store) DeleteTLSCacheEntry(ctx context.Context, cacheKey string) error {
+	return s.writeDB.WithContext(ctx).Delete(&model.TLSCacheEntry{}, "cache_key = ?", cacheKey).Error
+}
+
 // --- Terminal History ---
 
 func (s *Store) ListTerminalHistory(ctx context.Context, sessionID string, limit int) ([]*model.TerminalHistory, error) {

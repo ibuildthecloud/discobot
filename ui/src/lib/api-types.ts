@@ -537,6 +537,9 @@ export interface StatusMessage {
 
 export interface ServerConfig {
 	ssh_port: number;
+	http_port?: number;
+	https_port?: number;
+	https_tls_mode?: "ephemeral" | "static" | "acme";
 }
 
 export interface SystemStatusResponse {
@@ -613,6 +616,8 @@ export interface VZInfo {
 /** Configuration information for debug/support (sanitized, no secrets) */
 export interface ConfigInfo {
 	port: number;
+	https_port?: number;
+	https_tls_mode?: "ephemeral" | "static" | "acme";
 	database_driver: string;
 	auth_enabled: boolean;
 	workspace_dir: string;

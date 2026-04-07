@@ -72,7 +72,7 @@ server/
 | `AUTH_ENABLED` | No | false | Enable authentication (requires OAuth setup) |
 | `SESSION_SECRET` | When auth enabled | dev default | Secret for session tokens (min 32 chars) |
 | `ENCRYPTION_KEY` | When auth enabled | dev default | 32-byte hex-encoded key for credential encryption |
-| `CORS_ORIGINS` | No | http://localhost:3000 | Comma-separated allowed origins |
+| `CORS_ORIGINS` | No | Computed from HTTP/HTTPS ports plus local dev UI ports | Comma-separated allowed origins; supports `{HTTP_PORT}` and `{HTTPS_PORT}` placeholders |
 | `WORKSPACE_DIR` | No | ./workspaces | Directory for workspace files |
 | `GITHUB_CLIENT_ID` | No | - | GitHub OAuth client ID |
 | `GITHUB_CLIENT_SECRET` | No | - | GitHub OAuth client secret |

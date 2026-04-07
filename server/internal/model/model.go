@@ -408,6 +408,24 @@ func (p *UserPreference) BeforeCreate(_ *gorm.DB) error {
 	return nil
 }
 
+// TLSCacheEntry stores encrypted TLS state blobs, such as ACME/autocert cache data.
+type TLSCacheEntry struct {
+	ID            string    `gorm:"primaryKey;type:text" json:"id"`
+	CacheKey      string    `gorm:"column:cache_key;not null;type:text;uniqueIndex" json:"cacheKey"`
+	EncryptedData []byte    `gorm:"column:encrypted_data" json:"-"`
+	CreatedAt     time.Time `gorm:"autoCreateTime" json:"createdAt"`
+	UpdatedAt     time.Time `gorm:"autoUpdateTime" json:"updatedAt"`
+}
+
+func (TLSCacheEntry) TableName() string { return "tls_cache_entries" }
+
+func (e *TLSCacheEntry) BeforeCreate(_ *gorm.DB) error {
+	if e.ID == "" {
+		e.ID = uuid.New().String()
+	}
+	return nil
+}
+
 // AllModels returns all model types for migration.
 func AllModels() []interface{} {
 	return []interface{}{
@@ -427,5 +445,6 @@ func AllModels() []interface{} {
 		&Job{},
 		&DispatcherLeader{},
 		&UserPreference{},
+		&TLSCacheEntry{},
 	}
 }

@@ -14,13 +14,19 @@ import (
 
 // ServerConfigResponse contains public server configuration for the frontend
 type ServerConfigResponse struct {
-	SSHPort int `json:"ssh_port"`
+	SSHPort      int    `json:"ssh_port"`
+	HTTPPort     int    `json:"http_port"`
+	HTTPSPort    int    `json:"https_port,omitempty"`
+	HTTPSTLSMode string `json:"https_tls_mode,omitempty"`
 }
 
 // GetServerConfig returns public server configuration
 func (h *Handler) GetServerConfig(w http.ResponseWriter, _ *http.Request) {
 	h.JSON(w, http.StatusOK, ServerConfigResponse{
-		SSHPort: h.cfg.SSHPort,
+		SSHPort:      h.cfg.SSHPort,
+		HTTPPort:     h.cfg.Port,
+		HTTPSPort:    h.cfg.HTTPSPort,
+		HTTPSTLSMode: h.cfg.HTTPSTLSMode,
 	})
 }
 
@@ -63,6 +69,8 @@ type RuntimeInfo struct {
 // ConfigInfo contains sanitized configuration information
 type ConfigInfo struct {
 	Port               int      `json:"port"`
+	HTTPSPort          int      `json:"https_port,omitempty"`
+	HTTPSTLSMode       string   `json:"https_tls_mode,omitempty"`
 	DatabaseDriver     string   `json:"database_driver"`
 	AuthEnabled        bool     `json:"auth_enabled"`
 	WorkspaceDir       string   `json:"workspace_dir"`
@@ -123,6 +131,8 @@ func (h *Handler) GetSupportInfo(w http.ResponseWriter, _ *http.Request) {
 
 	configInfo := ConfigInfo{
 		Port:               h.cfg.Port,
+		HTTPSPort:          h.cfg.HTTPSPort,
+		HTTPSTLSMode:       h.cfg.HTTPSTLSMode,
 		DatabaseDriver:     h.cfg.DatabaseDriver,
 		AuthEnabled:        h.cfg.AuthEnabled,
 		WorkspaceDir:       h.cfg.WorkspaceDir,
