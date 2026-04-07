@@ -62,8 +62,9 @@ func (m *managedService) addSubscriber() (ch <-chan OutputEvent, unsubscribe fun
 
 // Manager handles service discovery, process lifecycle, and output streaming.
 type Manager struct {
-	mu       sync.RWMutex
-	services map[string]*managedService // keyed by service ID
+	mu          sync.RWMutex
+	services    map[string]*managedService // keyed by service ID
+	envSnapshot func() map[string]string
 }
 
 // NewManager creates a new service Manager.
@@ -71,6 +72,14 @@ func NewManager() *Manager {
 	return &Manager{
 		services: make(map[string]*managedService),
 	}
+}
+
+// SetEnvSnapshot sets an optional function that returns request-scoped
+// environment variables to inject into launched services.
+func (mgr *Manager) SetEnvSnapshot(fn func() map[string]string) {
+	mgr.mu.Lock()
+	defer mgr.mu.Unlock()
+	mgr.envSnapshot = fn
 }
 
 // desktopService is the built-in VNC desktop service.
@@ -196,8 +205,9 @@ func (mgr *Manager) StartService(workspaceRoot, serviceID string) (*ServiceInfo,
 	// Clear previous output
 	clearOutput(serviceID)
 
-	// Spawn the service
-	mgr.spawnService(workspaceRoot, *svcTemplate)
+	// Spawn the service with the visible environment snapshot from this request.
+	requestEnv := mgr.visibleEnvSnapshot()
+	mgr.spawnService(workspaceRoot, *svcTemplate, requestEnv)
 
 	svc := ServiceInfo{
 		ID:     serviceID,
@@ -277,7 +287,7 @@ func (mgr *Manager) IsManaged(serviceID string) bool {
 }
 
 // spawnService starts a service process and registers it in the manager.
-func (mgr *Manager) spawnService(workspaceRoot string, svcTemplate ServiceInfo) {
+func (mgr *Manager) spawnService(workspaceRoot string, svcTemplate ServiceInfo, requestEnv map[string]string) {
 	svc := svcTemplate
 	svc.Status = "starting"
 	svc.StartedAt = time.Now().UTC().Format(time.RFC3339)
@@ -285,7 +295,7 @@ func (mgr *Manager) spawnService(workspaceRoot string, svcTemplate ServiceInfo) 
 	command, args := buildServiceCommand(svcTemplate.Path)
 	cmd := exec.Command(command, args...)
 	cmd.Dir = workspaceRoot
-	cmd.Env = os.Environ()
+	cmd.Env = mergedEnv(requestEnv)
 	setSysProcAttr(cmd)
 
 	stdout, err := cmd.StdoutPipe()
@@ -394,6 +404,35 @@ func buildServiceCommand(path string) (string, []string) {
 	default:
 		return interpreter, append(args, path)
 	}
+}
+
+func (mgr *Manager) visibleEnvSnapshot() map[string]string {
+	mgr.mu.RLock()
+	fn := mgr.envSnapshot
+	mgr.mu.RUnlock()
+	if fn == nil {
+		return nil
+	}
+	return fn()
+}
+
+func mergedEnv(requestEnv map[string]string) []string {
+	env := make(map[string]string, len(os.Environ())+len(requestEnv))
+	for _, entry := range os.Environ() {
+		key, value, ok := strings.Cut(entry, "=")
+		if !ok {
+			continue
+		}
+		env[key] = value
+	}
+	for key, value := range requestEnv {
+		env[key] = value
+	}
+	out := make([]string, 0, len(env))
+	for key, value := range env {
+		out = append(out, key+"="+value)
+	}
+	return out
 }
 
 func parseServiceShebang(path string) (string, []string) {

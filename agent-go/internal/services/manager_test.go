@@ -104,6 +104,95 @@ wait
 	waitForProcessesGone(t, parentPID, childPID, grandchildPID)
 }
 
+func TestStartServiceUsesVisibleEnvSnapshotAtLaunch(t *testing.T) {
+	homeDir := t.TempDir()
+	workspaceRoot := t.TempDir()
+	outputPath := filepath.Join(workspaceRoot, "visible-env.txt")
+	t.Setenv("HOME", homeDir)
+	t.Setenv("VISIBLE_FROM_OS", "os-value")
+
+	servicesDir := filepath.Join(workspaceRoot, ServicesDir)
+	if err := os.MkdirAll(servicesDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll() failed: %v", err)
+	}
+
+	serviceID := "visible-env-test"
+	scriptPath := filepath.Join(servicesDir, serviceID+".sh")
+	script := fmt.Sprintf(`#!/bin/sh
+set -eu
+printf 'VISIBLE_AT_LAUNCH=%%s\n' "${VISIBLE_AT_LAUNCH:-}" > %q
+printf 'VISIBLE_FROM_OS=%%s\n' "${VISIBLE_FROM_OS:-}" >> %q
+`, outputPath, outputPath)
+	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("WriteFile() failed: %v", err)
+	}
+
+	mgr := NewManager()
+	visibleEnv := map[string]string{"VISIBLE_AT_LAUNCH": "first-value"}
+	mgr.SetEnvSnapshot(func() map[string]string {
+		snapshot := make(map[string]string, len(visibleEnv))
+		for key, value := range visibleEnv {
+			snapshot[key] = value
+		}
+		return snapshot
+	})
+
+	if _, code, err := mgr.StartService(workspaceRoot, serviceID); err != nil {
+		t.Fatalf("StartService() failed: code=%q err=%v", code, err)
+	}
+
+	visibleEnv["VISIBLE_AT_LAUNCH"] = "second-value"
+
+	waitForCondition(t, 5*time.Second, func() (bool, string, error) {
+		data, err := os.ReadFile(outputPath)
+		if os.IsNotExist(err) {
+			return false, "waiting for service output file", nil
+		}
+		if err != nil {
+			return false, "", err
+		}
+		text := strings.TrimSpace(string(data))
+		if text == "" {
+			return false, "waiting for service output contents", nil
+		}
+		return true, "", nil
+	})
+
+	data, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("ReadFile() failed: %v", err)
+	}
+	got := string(data)
+	if !strings.Contains(got, "VISIBLE_AT_LAUNCH=first-value") {
+		t.Fatalf("service did not receive request-scoped visible env at launch: %q", got)
+	}
+	if !strings.Contains(got, "VISIBLE_FROM_OS=os-value") {
+		t.Fatalf("service did not preserve process env: %q", got)
+	}
+	if strings.Contains(got, "VISIBLE_AT_LAUNCH=second-value") {
+		t.Fatalf("service used a later env snapshot instead of launch-time values: %q", got)
+	}
+	waitForServiceStopped(t, mgr, workspaceRoot, serviceID)
+}
+
+func waitForServiceStopped(t *testing.T, mgr *Manager, workspaceRoot, serviceID string) {
+	t.Helper()
+
+	waitForCondition(t, 5*time.Second, func() (bool, string, error) {
+		svc, err := mgr.GetService(workspaceRoot, serviceID)
+		if err != nil {
+			return false, "", err
+		}
+		if svc == nil {
+			return false, "waiting for service state", nil
+		}
+		if svc.Status != "stopped" {
+			return false, "waiting for service to stop", nil
+		}
+		return true, "", nil
+	})
+}
+
 func waitForPIDFile(t *testing.T, path string) int {
 	t.Helper()
 

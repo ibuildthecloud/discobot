@@ -89,6 +89,9 @@ func Run(cfg *config.Config) {
 
 	// ── Service manager ──────────────────────────────────────────────────────
 	svcMgr := services.NewManager()
+	svcMgr.SetEnvSnapshot(func() map[string]string {
+		return credMgr.Snapshot()
+	})
 
 	// ── HTTP handler ─────────────────────────────────────────────────────────
 	h := handler.New(cfg.AgentCwd, completions, hookMgr, svcMgr, a)
