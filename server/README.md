@@ -117,6 +117,16 @@ After startup seeding, the server also imports known credential environment vari
 go build -o discobot-server ./cmd/server
 ```
 
+### Authservice container image
+
+Use the dedicated authservice Dockerfile when you want to package the standalone `authservice` executable:
+
+```bash
+docker build -f authservice/Dockerfile -t discobot-authservice .
+```
+
+The local rolling deployment setup under `authservice/docker-compose.rolling.yml` builds this image from the repository root with `context: ..`.
+
 ## API Endpoints
 
 ### Projects

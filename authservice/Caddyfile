@@ -1,0 +1,12 @@
+{
+	admin 127.0.0.1:2019
+}
+
+{$CADDY_SITE_ADDRESS} {
+	reverse_proxy authservice-a:3010 authservice-b:3010 {
+		lb_policy round_robin
+		health_uri /.well-known/openid-configuration
+		health_interval 5s
+		health_timeout 2s
+	}
+}

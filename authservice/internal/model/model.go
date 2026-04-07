@@ -116,13 +116,13 @@ func (c *AuthorizationCode) BeforeCreate(_ *gorm.DB) error {
 }
 
 type SigningKey struct {
-	ID            string    `gorm:"primaryKey;type:text" json:"id"`
-	Kid           string    `gorm:"column:kid;not null;type:text;uniqueIndex" json:"kid"`
-	Algorithm     string    `gorm:"column:algorithm;not null;type:text" json:"algorithm"`
-	PrivateKeyPEM string    `gorm:"column:private_key_pem;not null;type:text" json:"-"`
-	Active        bool      `gorm:"column:active;not null;default:true;index" json:"active"`
-	CreatedAt     time.Time `gorm:"autoCreateTime" json:"created_at"`
-	UpdatedAt     time.Time `gorm:"autoUpdateTime" json:"updated_at"`
+	ID                      string    `gorm:"primaryKey;type:text" json:"id"`
+	Kid                     string    `gorm:"column:kid;not null;type:text;uniqueIndex" json:"kid"`
+	Algorithm               string    `gorm:"column:algorithm;not null;type:text" json:"algorithm"`
+	PrivateKeyEncryptedData []byte    `gorm:"column:private_key_encrypted_data;not null" json:"-"`
+	Active                  bool      `gorm:"column:active;not null;default:true;index" json:"active"`
+	CreatedAt               time.Time `gorm:"autoCreateTime" json:"created_at"`
+	UpdatedAt               time.Time `gorm:"autoUpdateTime" json:"updated_at"`
 }
 
 func (SigningKey) TableName() string { return "signing_keys" }

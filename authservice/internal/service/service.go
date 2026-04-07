@@ -22,13 +22,15 @@ import (
 	"golang.org/x/oauth2/google"
 
 	"github.com/obot-platform/discobot/authservice/internal/config"
+	"github.com/obot-platform/discobot/authservice/internal/encryption"
 	"github.com/obot-platform/discobot/authservice/internal/model"
 	"github.com/obot-platform/discobot/authservice/internal/store"
 )
 
 type Service struct {
-	store *store.Store
-	cfg   *config.Config
+	store     *store.Store
+	cfg       *config.Config
+	encryptor *encryption.Encryptor
 }
 
 type UpstreamIdentity struct {
@@ -94,8 +96,12 @@ type LoginPageData struct {
 	HasProviders bool
 }
 
-func New(st *store.Store, cfg *config.Config) *Service {
-	return &Service{store: st, cfg: cfg}
+func New(st *store.Store, cfg *config.Config) (*Service, error) {
+	encryptor, err := encryption.NewEncryptor(cfg.EncryptionKey)
+	if err != nil {
+		return nil, fmt.Errorf("create authservice encryptor: %w", err)
+	}
+	return &Service{store: st, cfg: cfg, encryptor: encryptor}, nil
 }
 
 func GenerateState() (string, error) {
@@ -597,7 +603,11 @@ func (s *Service) parseSignedToken(ctx context.Context, token string) (*struct {
 func (s *Service) signingKey(ctx context.Context) (ed25519.PrivateKey, string, error) {
 	stored, err := s.store.GetActiveSigningKey(ctx)
 	if err == nil {
-		priv, err := parsePrivateKeyPEM(stored.PrivateKeyPEM)
+		decrypted, err := s.encryptor.Decrypt(stored.PrivateKeyEncryptedData)
+		if err != nil {
+			return nil, "", fmt.Errorf("decrypt signing key: %w", err)
+		}
+		priv, err := parsePrivateKeyPEM(string(decrypted))
 		return priv, stored.Kid, err
 	}
 	if err != store.ErrNotFound {
@@ -612,7 +622,12 @@ func (s *Service) signingKey(ctx context.Context) (ed25519.PrivateKey, string, e
 		return nil, "", err
 	}
 	kid := uuid.New().String()
-	key := &model.SigningKey{Kid: kid, Algorithm: "EdDSA", PrivateKeyPEM: string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: pkcs8})), Active: true}
+	privateKeyPEM := string(pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: pkcs8}))
+	encrypted, err := s.encryptor.Encrypt([]byte(privateKeyPEM))
+	if err != nil {
+		return nil, "", fmt.Errorf("encrypt signing key: %w", err)
+	}
+	key := &model.SigningKey{Kid: kid, Algorithm: "EdDSA", PrivateKeyEncryptedData: encrypted, Active: true}
 	if err := s.store.CreateSigningKey(ctx, key); err != nil {
 		return nil, "", err
 	}

@@ -55,6 +55,5 @@ func (e *Encryptor) Decrypt(ciphertext []byte) ([]byte, error) {
 	if err != nil {
 		return nil, ErrDecryptionFailed
 	}
-
 	return plaintext, nil
 }

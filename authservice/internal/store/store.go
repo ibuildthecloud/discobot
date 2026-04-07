@@ -162,7 +162,7 @@ func (s *Store) CreateSigningKey(ctx context.Context, key *model.SigningKey) err
 
 func (s *Store) GetTLSCacheEntry(ctx context.Context, cacheKey string) (*model.TLSCacheEntry, error) {
 	var entry model.TLSCacheEntry
-	if err := s.db.WithContext(ctx).First(&entry, "cache_key = ?", cacheKey).Error; err != nil {
+	if err := s.readDB.WithContext(ctx).First(&entry, "cache_key = ?", cacheKey).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, ErrNotFound
 		}
@@ -178,16 +178,20 @@ func (s *Store) PutTLSCacheEntry(ctx context.Context, cacheKey string, encrypted
 	}
 	if existing != nil {
 		existing.EncryptedData = encryptedData
-		return s.db.WithContext(ctx).Save(existing).Error
+		return s.writeDB.WithContext(ctx).Save(existing).Error
 	}
-	return s.db.WithContext(ctx).Create(&model.TLSCacheEntry{
+	return s.writeDB.WithContext(ctx).Create(&model.TLSCacheEntry{
 		CacheKey:      cacheKey,
 		EncryptedData: encryptedData,
 	}).Error
 }
 
 func (s *Store) DeleteTLSCacheEntry(ctx context.Context, cacheKey string) error {
-	return s.db.WithContext(ctx).Delete(&model.TLSCacheEntry{}, "cache_key = ?", cacheKey).Error
+	return s.writeDB.WithContext(ctx).Delete(&model.TLSCacheEntry{}, "cache_key = ?", cacheKey).Error
+}
+
+func (s *Store) UpdateSigningKey(ctx context.Context, key *model.SigningKey) error {
+	return s.writeDB.WithContext(ctx).Save(key).Error
 }
 
 func HashString(value string) string {

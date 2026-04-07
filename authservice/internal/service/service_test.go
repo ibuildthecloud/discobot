@@ -71,10 +71,15 @@ func newTestService(t *testing.T) *Service {
 	}
 	cfg := &config.Config{
 		Port:                 3010,
+		EncryptionKey:        []byte("01234567890123456789012345678901"),
 		PublicHostname:       "auth.example.com",
 		BrowserSessionTTL:    24 * time.Hour,
 		AuthorizationCodeTTL: 5 * time.Minute,
 		AccessTokenTTL:       15 * time.Minute,
 	}
-	return New(store.New(db, nil), cfg)
+	svc, err := New(store.New(db, nil), cfg)
+	if err != nil {
+		t.Fatalf("failed to create test service: %v", err)
+	}
+	return svc
 }

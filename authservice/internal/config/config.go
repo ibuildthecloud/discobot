@@ -13,24 +13,25 @@ import (
 )
 
 type Config struct {
-	Port                 int
-	HTTPSPort            int
-	HTTPSTLSMode         string
-	HTTPSTLSCertFile     string
-	HTTPSTLSKeyFile      string
-	HTTPSTLSHosts        []string
-	HTTPSACMEEmail       string
-	DatabaseDSN          string
-	DatabaseDriver       string
-	EncryptionKey        []byte
-	PublicHostname       string
-	GoogleClientID       string
-	GoogleClientSecret   string
-	GitHubClientID       string
-	GitHubClientSecret   string
-	BrowserSessionTTL    time.Duration
-	AuthorizationCodeTTL time.Duration
-	AccessTokenTTL       time.Duration
+	Port                       int
+	HTTPSPort                  int
+	HTTPSTLSMode               string
+	HTTPSTLSCertFile           string
+	HTTPSTLSKeyFile            string
+	HTTPSTLSHosts              []string
+	HTTPSACMEEmail             string
+	DatabaseDSN                string
+	DatabaseDriver             string
+	EncryptionKey              []byte
+	UsingInsecureEncryptionKey bool
+	PublicHostname             string
+	GoogleClientID             string
+	GoogleClientSecret         string
+	GitHubClientID             string
+	GitHubClientSecret         string
+	BrowserSessionTTL          time.Duration
+	AuthorizationCodeTTL       time.Duration
+	AccessTokenTTL             time.Duration
 }
 
 func Load() (*Config, error) {
@@ -44,6 +45,21 @@ func Load() (*Config, error) {
 	cfg.HTTPSACMEEmail = getEnv("HTTPS_ACME_EMAIL", "")
 	cfg.DatabaseDSN = getEnv("DATABASE_DSN", "sqlite3://"+filepath.Join(xdg.DataHome, "discobot", "discobot-auth.db"))
 	cfg.DatabaseDriver = detectDriver(cfg.DatabaseDSN)
+
+	encryptionKeyStr := getEnv("ENCRYPTION_KEY", "")
+	if encryptionKeyStr == "" {
+		encryptionKeyStr = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+		cfg.UsingInsecureEncryptionKey = true
+	}
+	encryptionKey, err := hex.DecodeString(encryptionKeyStr)
+	if err != nil {
+		return nil, fmt.Errorf("ENCRYPTION_KEY must be hex encoded: %w", err)
+	}
+	if len(encryptionKey) != 32 {
+		return nil, fmt.Errorf("ENCRYPTION_KEY must be exactly 32 bytes (64 hex chars), got %d bytes", len(encryptionKey))
+	}
+	cfg.EncryptionKey = encryptionKey
+
 	cfg.PublicHostname = getEnv("PUBLIC_HOSTNAME", "")
 	cfg.GoogleClientID = getEnv("GOOGLE_CLIENT_ID", "")
 	cfg.GoogleClientSecret = getEnv("GOOGLE_CLIENT_SECRET", "")
@@ -70,19 +86,6 @@ func Load() (*Config, error) {
 	default:
 		return nil, fmt.Errorf("HTTPS_TLS_MODE must be one of: ephemeral, static, acme")
 	}
-
-	encryptionKeyStr := getEnv("ENCRYPTION_KEY", "")
-	if encryptionKeyStr == "" {
-		encryptionKeyStr = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
-	}
-	encryptionKey, err := hex.DecodeString(encryptionKeyStr)
-	if err != nil {
-		return nil, fmt.Errorf("ENCRYPTION_KEY must be hex encoded: %w", err)
-	}
-	if len(encryptionKey) != 32 {
-		return nil, fmt.Errorf("ENCRYPTION_KEY must be exactly 32 bytes (64 hex chars), got %d bytes", len(encryptionKey))
-	}
-	cfg.EncryptionKey = encryptionKey
 
 	if cfg.GoogleClientID == "" && cfg.GitHubClientID == "" {
 		return nil, fmt.Errorf("at least one upstream provider must be configured")
@@ -176,19 +179,28 @@ func getEnvInt(key string, defaultValue int) int {
 
 func getEnvList(key string, defaultValue []string) []string {
 	if value := os.Getenv(key); value != "" {
-		return strings.Split(value, ",")
+		parts := strings.Split(value, ",")
+		result := make([]string, 0, len(parts))
+		for _, part := range parts {
+			trimmed := strings.TrimSpace(part)
+			if trimmed != "" {
+				result = append(result, trimmed)
+			}
+		}
+		if len(result) > 0 {
+			return result
+		}
 	}
-	return defaultValue
+	return append([]string(nil), defaultValue...)
 }
 
 func compactStrings(values []string) []string {
 	result := make([]string, 0, len(values))
 	for _, value := range values {
-		value = strings.TrimSpace(value)
-		if value == "" {
-			continue
+		trimmed := strings.TrimSpace(value)
+		if trimmed != "" {
+			result = append(result, trimmed)
 		}
-		result = append(result, value)
 	}
 	return result
 }

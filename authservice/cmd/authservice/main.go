@@ -22,6 +22,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to load config: %v", err)
 	}
+	if cfg.UsingInsecureEncryptionKey {
+		log.Printf("WARNING: ENCRYPTION_KEY is not set; using the built-in insecure fallback key")
+		log.Printf("WARNING: all authservice deployments without ENCRYPTION_KEY will share the same key")
+		log.Printf("WARNING: set ENCRYPTION_KEY to a unique 64-hex-character value before production use")
+	}
 	db, err := database.New(cfg)
 	if err != nil {
 		log.Fatalf("failed to open database: %v", err)
@@ -39,7 +44,10 @@ func main() {
 	if err != nil {
 		log.Fatalf("failed to initialize HTTPS configuration: %v", err)
 	}
-	svc := service.New(st, cfg)
+	svc, err := service.New(st, cfg)
+	if err != nil {
+		log.Fatalf("failed to create service: %v", err)
+	}
 	h := handler.New(cfg, svc)
 	router := h.Router()
 	addr := ":" + httpPort(cfg.Port)
