@@ -9,6 +9,7 @@
 		"dev:app": "pnpm build:server && tauri dev",
 		"dev:frontend": "pnpm ui:dev",
 		"dev:server": "cd server && cross-env SUGGESTIONS_ENABLED=true go run github.com/air-verse/air@latest",
+		"dev:authservice": "cd authservice && go run github.com/air-verse/air@latest",
 		"dev:agent": "tsx --watch scripts/agent-watcher/index.ts",
 		"dev:db": "bash .discobot/services/db.sh",
 		"dev:vz": "tsx --watch scripts/vz-watcher/index.ts",
