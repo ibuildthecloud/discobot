@@ -109,6 +109,8 @@ By default, CORS origins are generated from the configured API listener ports. T
 
 On startup, the server first waits until each configured listener port can be bound. It probes `PORT` and `HTTPS_PORT` every 10 seconds for up to 2 minutes, immediately releases the probe listener on success, and only then continues with the normal startup sequence. This avoids restart races with a previous process that is still shutting down.
 
+After startup seeding, the server also imports known credential environment variables into the default local project when possible. This is additive only: if the project already has a credential for that env var or provider, the server leaves it unchanged and does not create a duplicate.
+
 ### Building
 
 ```bash

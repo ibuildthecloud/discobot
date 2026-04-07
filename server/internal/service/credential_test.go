@@ -671,3 +671,176 @@ func TestDirectToken_NoRefreshAttemptWhenExpired(t *testing.T) {
 		t.Error("Expected no refresh failure to be recorded for direct token without refresh token")
 	}
 }
+
+func TestImportEnvCredentials_CreatesKnownCredentials(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "sk-openai")
+	t.Setenv("TAVILY_API_KEY", "tvly")
+
+	st := setupTestStore(t)
+	cfg := &config.Config{
+		EncryptionKey: []byte("test-key-32-bytes-long-123456789"),
+	}
+
+	credSvc, err := NewCredentialService(st, cfg)
+	if err != nil {
+		t.Fatalf("Failed to create credential service: %v", err)
+	}
+
+	if err := credSvc.ImportEnvCredentials(context.Background(), "test-project"); err != nil {
+		t.Fatalf("ImportEnvCredentials failed: %v", err)
+	}
+
+	creds, err := credSvc.List(context.Background(), "test-project")
+	if err != nil {
+		t.Fatalf("List failed: %v", err)
+	}
+	if len(creds) != 2 {
+		t.Fatalf("expected 2 credentials, got %d", len(creds))
+	}
+
+	envVars, err := credSvc.GetAllDecrypted(context.Background(), "test-project")
+	if err != nil {
+		t.Fatalf("GetAllDecrypted failed: %v", err)
+	}
+	if len(envVars) != 2 {
+		t.Fatalf("expected 2 env vars, got %d", len(envVars))
+	}
+
+	got := make(map[string]string, len(envVars))
+	for _, envVar := range envVars {
+		got[envVar.EnvVar] = envVar.Value
+	}
+	if got["OPENAI_API_KEY"] != "sk-openai" {
+		t.Fatalf("expected OPENAI_API_KEY to be imported, got %q", got["OPENAI_API_KEY"])
+	}
+	if got["TAVILY_API_KEY"] != "tvly" {
+		t.Fatalf("expected TAVILY_API_KEY to be imported, got %q", got["TAVILY_API_KEY"])
+	}
+}
+
+func TestImportEnvCredentials_IsIdempotent(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "sk-openai")
+
+	st := setupTestStore(t)
+	cfg := &config.Config{
+		EncryptionKey: []byte("test-key-32-bytes-long-123456789"),
+	}
+
+	credSvc, err := NewCredentialService(st, cfg)
+	if err != nil {
+		t.Fatalf("Failed to create credential service: %v", err)
+	}
+
+	ctx := context.Background()
+	projectID := "test-project"
+	if err := credSvc.ImportEnvCredentials(ctx, projectID); err != nil {
+		t.Fatalf("first import failed: %v", err)
+	}
+	if err := credSvc.ImportEnvCredentials(ctx, projectID); err != nil {
+		t.Fatalf("second import failed: %v", err)
+	}
+
+	creds, err := credSvc.List(ctx, projectID)
+	if err != nil {
+		t.Fatalf("List failed: %v", err)
+	}
+	if len(creds) != 1 {
+		t.Fatalf("expected 1 credential after repeated imports, got %d", len(creds))
+	}
+}
+
+func TestImportEnvCredentials_DoesNotOverrideExistingEnvVar(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "sk-from-env")
+
+	st := setupTestStore(t)
+	cfg := &config.Config{
+		EncryptionKey: []byte("test-key-32-bytes-long-123456789"),
+	}
+
+	credSvc, err := NewCredentialService(st, cfg)
+	if err != nil {
+		t.Fatalf("Failed to create credential service: %v", err)
+	}
+
+	ctx := context.Background()
+	projectID := "test-project"
+	if _, err := credSvc.SetCustomCredential(ctx, projectID, "", "", "", []SecretEnvVar{{
+		Key:   "OPENAI_API_KEY",
+		Value: "existing-secret",
+	}}, false, false); err != nil {
+		t.Fatalf("Failed to create existing credential: %v", err)
+	}
+
+	if err := credSvc.ImportEnvCredentials(ctx, projectID); err != nil {
+		t.Fatalf("ImportEnvCredentials failed: %v", err)
+	}
+
+	envVars, err := credSvc.GetAllDecrypted(ctx, projectID)
+	if err != nil {
+		t.Fatalf("GetAllDecrypted failed: %v", err)
+	}
+	if len(envVars) != 1 {
+		t.Fatalf("expected 1 env var, got %d", len(envVars))
+	}
+	if envVars[0].Value != "existing-secret" {
+		t.Fatalf("expected existing secret to remain unchanged, got %q", envVars[0].Value)
+	}
+}
+
+func TestImportEnvCredentials_BlankEnvVarsDoNothing(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "   ")
+
+	st := setupTestStore(t)
+	cfg := &config.Config{
+		EncryptionKey: []byte("test-key-32-bytes-long-123456789"),
+	}
+
+	credSvc, err := NewCredentialService(st, cfg)
+	if err != nil {
+		t.Fatalf("Failed to create credential service: %v", err)
+	}
+
+	if err := credSvc.ImportEnvCredentials(context.Background(), "test-project"); err != nil {
+		t.Fatalf("ImportEnvCredentials failed: %v", err)
+	}
+
+	creds, err := credSvc.List(context.Background(), "test-project")
+	if err != nil {
+		t.Fatalf("List failed: %v", err)
+	}
+	if len(creds) != 0 {
+		t.Fatalf("expected no credentials, got %d", len(creds))
+	}
+}
+
+func TestImportEnvCredentials_PrefersExistingProvider(t *testing.T) {
+	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-key")
+	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "oauth-token")
+
+	st := setupTestStore(t)
+	cfg := &config.Config{
+		EncryptionKey: []byte("test-key-32-bytes-long-123456789"),
+	}
+
+	credSvc, err := NewCredentialService(st, cfg)
+	if err != nil {
+		t.Fatalf("Failed to create credential service: %v", err)
+	}
+
+	ctx := context.Background()
+	projectID := "test-project"
+	if err := credSvc.ImportEnvCredentials(ctx, projectID); err != nil {
+		t.Fatalf("ImportEnvCredentials failed: %v", err)
+	}
+
+	envVars, err := credSvc.GetAllDecrypted(ctx, projectID)
+	if err != nil {
+		t.Fatalf("GetAllDecrypted failed: %v", err)
+	}
+	if len(envVars) != 1 {
+		t.Fatalf("expected 1 imported anthropic credential, got %d", len(envVars))
+	}
+	if envVars[0].EnvVar != "ANTHROPIC_API_KEY" {
+		t.Fatalf("expected API key import to win for anthropic, got %s", envVars[0].EnvVar)
+	}
+}

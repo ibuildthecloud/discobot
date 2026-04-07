@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -120,6 +121,21 @@ type CredentialService struct {
 	refreshFailMutex sync.RWMutex         // Protect the map
 }
 
+type startupCredentialImportSpec struct {
+	provider string
+	authType string
+	envVar   string
+}
+
+var startupCredentialImportSpecs = []startupCredentialImportSpec{
+	{provider: ProviderAnthropic, authType: AuthTypeAPIKey, envVar: "ANTHROPIC_API_KEY"},
+	{provider: ProviderAnthropic, authType: AuthTypeOAuth, envVar: "CLAUDE_CODE_OAUTH_TOKEN"},
+	{provider: ProviderOpenAI, authType: AuthTypeAPIKey, envVar: "OPENAI_API_KEY"},
+	{provider: ProviderCodex, authType: AuthTypeOAuth, envVar: "CODEX_TOKEN"},
+	{provider: ProviderTavily, authType: AuthTypeAPIKey, envVar: "TAVILY_API_KEY"},
+	{provider: ProviderDiscobot, authType: AuthTypeID, envVar: "DISCOBOT_TOKEN"},
+}
+
 // NewCredentialService creates a new credential service
 func NewCredentialService(s *store.Store, cfg *config.Config) (*CredentialService, error) {
 	enc, err := encryption.NewEncryptor(cfg.EncryptionKey)
@@ -147,6 +163,67 @@ func (s *CredentialService) List(ctx context.Context, projectID string) ([]Crede
 		result[i] = s.toCredentialInfo(c)
 	}
 	return result, nil
+}
+
+// ImportEnvCredentials creates credentials in a project from known process env vars.
+// It is additive only: existing credentials are never modified or overridden.
+func (s *CredentialService) ImportEnvCredentials(ctx context.Context, projectID string) error {
+	creds, err := s.store.ListCredentialsByProject(ctx, projectID)
+	if err != nil {
+		return err
+	}
+
+	existingProviders := make(map[string]struct{}, len(creds))
+	existingEnvVars := make(map[string]struct{})
+	for _, cred := range creds {
+		existingProviders[cred.Provider] = struct{}{}
+		for _, envVar := range s.credentialEnvVars(cred) {
+			existingEnvVars[envVar] = struct{}{}
+		}
+	}
+
+	for _, spec := range startupCredentialImportSpecs {
+		value := strings.TrimSpace(os.Getenv(spec.envVar))
+		if value == "" {
+			continue
+		}
+		if _, exists := existingProviders[spec.provider]; exists {
+			continue
+		}
+		if _, exists := existingEnvVars[spec.envVar]; exists {
+			continue
+		}
+
+		name := importedCredentialName(spec.provider, spec.authType)
+		description := defaultCredentialDescription(spec.provider)
+
+		switch spec.authType {
+		case AuthTypeAPIKey:
+			if _, err := s.SetAPIKeyWithMetadata(ctx, projectID, spec.provider, name, description, value, defaultCredentialAgentVisible(spec.provider), false); err != nil {
+				return err
+			}
+		case AuthTypeID:
+			if _, err := s.SetIDWithMetadata(ctx, projectID, spec.provider, name, description, value, defaultCredentialAgentVisible(spec.provider), false); err != nil {
+				return err
+			}
+		case AuthTypeOAuth:
+			if _, err := s.SetOAuthTokens(ctx, projectID, spec.provider, name, &OAuthCredential{
+				AccessToken: value,
+				TokenType:   "Bearer",
+			}); err != nil {
+				return err
+			}
+		default:
+			continue
+		}
+
+		log.Printf("credentials: imported %s credential from %s into project %s", spec.provider, spec.envVar, projectID)
+
+		existingProviders[spec.provider] = struct{}{}
+		existingEnvVars[spec.envVar] = struct{}{}
+	}
+
+	return nil
 }
 
 // Get returns credential info for a specific provider (safe info only, no secrets)
@@ -879,6 +956,40 @@ func secretEnvKeys(envVars []SecretEnvVar) []string {
 		keys = append(keys, strings.TrimSpace(envVar.Key))
 	}
 	return keys
+}
+
+func importedCredentialName(provider, authType string) string {
+	if authType == AuthTypeID {
+		if p := providers.Get(provider); p != nil && strings.TrimSpace(p.ConfiguredName) != "" {
+			return strings.TrimSpace(p.ConfiguredName)
+		}
+	}
+	if p := providers.Get(provider); p != nil && strings.TrimSpace(p.Name) != "" {
+		return strings.TrimSpace(p.Name)
+	}
+	return provider
+}
+
+func (s *CredentialService) credentialEnvVars(c *model.Credential) []string {
+	switch c.AuthType {
+	case AuthTypeAPIKey, AuthTypeID:
+		data, err := s.getSecretData(c)
+		if err != nil {
+			return nil
+		}
+		return secretEnvKeys(data.EnvVars)
+	case AuthTypeOAuth:
+		envVar := firstProviderEnvVar(c.Provider)
+		if oauthEnvVar, exists := oauthEnvVars[c.Provider]; exists {
+			envVar = oauthEnvVar
+		}
+		if strings.TrimSpace(envVar) == "" {
+			return nil
+		}
+		return []string{envVar}
+	default:
+		return nil
+	}
 }
 
 func firstProviderEnvVar(provider string) string {

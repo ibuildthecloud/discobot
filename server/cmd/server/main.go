@@ -105,6 +105,14 @@ func main() {
 	// Create store with separate read/write pools for SQLite
 	s := store.New(db.DB, db.ReadDB)
 
+	credSvc, err := service.NewCredentialService(s, cfg)
+	if err != nil {
+		log.Fatalf("Failed to create credential service for startup: %v", err)
+	}
+	if err := credSvc.ImportEnvCredentials(context.Background(), model.DefaultProjectID); err != nil {
+		log.Printf("Warning: Failed to import startup credentials from environment: %v", err)
+	}
+
 	httpsSetup, err := tlsconfig.Load(cfg, s)
 	if err != nil {
 		log.Fatalf("Failed to initialize HTTPS configuration: %v", err)
