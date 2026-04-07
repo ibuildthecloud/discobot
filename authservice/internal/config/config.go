@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,8 +14,15 @@ import (
 
 type Config struct {
 	Port                 int
+	HTTPSPort            int
+	HTTPSTLSMode         string
+	HTTPSTLSCertFile     string
+	HTTPSTLSKeyFile      string
+	HTTPSTLSHosts        []string
+	HTTPSACMEEmail       string
 	DatabaseDSN          string
 	DatabaseDriver       string
+	EncryptionKey        []byte
 	PublicHostname       string
 	GoogleClientID       string
 	GoogleClientSecret   string
@@ -28,6 +36,12 @@ type Config struct {
 func Load() (*Config, error) {
 	cfg := &Config{}
 	cfg.Port = getEnvInt("PORT", 3010)
+	cfg.HTTPSPort = getEnvInt("HTTPS_PORT", 0)
+	cfg.HTTPSTLSMode = strings.ToLower(getEnv("HTTPS_TLS_MODE", "ephemeral"))
+	cfg.HTTPSTLSCertFile = getEnv("HTTPS_TLS_CERT_FILE", "")
+	cfg.HTTPSTLSKeyFile = getEnv("HTTPS_TLS_KEY_FILE", "")
+	cfg.HTTPSTLSHosts = compactStrings(getEnvList("HTTPS_TLS_HOSTS", []string{"localhost"}))
+	cfg.HTTPSACMEEmail = getEnv("HTTPS_ACME_EMAIL", "")
 	cfg.DatabaseDSN = getEnv("DATABASE_DSN", "sqlite3://"+filepath.Join(xdg.DataHome, "discobot", "discobot-auth.db"))
 	cfg.DatabaseDriver = detectDriver(cfg.DatabaseDSN)
 	cfg.PublicHostname = getEnv("PUBLIC_HOSTNAME", "")
@@ -39,6 +53,37 @@ func Load() (*Config, error) {
 	cfg.AuthorizationCodeTTL = getEnvDuration("AUTHORIZATION_CODE_TTL", 5*time.Minute)
 	cfg.AccessTokenTTL = getEnvDuration("ACCESS_TOKEN_TTL", 15*time.Minute)
 
+	if cfg.HTTPSPort == cfg.Port && cfg.HTTPSPort > 0 {
+		return nil, fmt.Errorf("HTTPS_PORT must be different from PORT")
+	}
+	switch cfg.HTTPSTLSMode {
+	case "", "ephemeral":
+		cfg.HTTPSTLSMode = "ephemeral"
+	case "static":
+		if cfg.HTTPSPort > 0 && (cfg.HTTPSTLSCertFile == "" || cfg.HTTPSTLSKeyFile == "") {
+			return nil, fmt.Errorf("HTTPS_TLS_CERT_FILE and HTTPS_TLS_KEY_FILE are required when HTTPS_TLS_MODE=static")
+		}
+	case "acme":
+		if cfg.HTTPSPort > 0 && len(cfg.HTTPSTLSHosts) == 0 {
+			return nil, fmt.Errorf("HTTPS_TLS_HOSTS is required when HTTPS_TLS_MODE=acme")
+		}
+	default:
+		return nil, fmt.Errorf("HTTPS_TLS_MODE must be one of: ephemeral, static, acme")
+	}
+
+	encryptionKeyStr := getEnv("ENCRYPTION_KEY", "")
+	if encryptionKeyStr == "" {
+		encryptionKeyStr = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+	}
+	encryptionKey, err := hex.DecodeString(encryptionKeyStr)
+	if err != nil {
+		return nil, fmt.Errorf("ENCRYPTION_KEY must be hex encoded: %w", err)
+	}
+	if len(encryptionKey) != 32 {
+		return nil, fmt.Errorf("ENCRYPTION_KEY must be exactly 32 bytes (64 hex chars), got %d bytes", len(encryptionKey))
+	}
+	cfg.EncryptionKey = encryptionKey
+
 	if cfg.GoogleClientID == "" && cfg.GitHubClientID == "" {
 		return nil, fmt.Errorf("at least one upstream provider must be configured")
 	}
@@ -49,11 +94,18 @@ func Load() (*Config, error) {
 func (c *Config) PublicBaseURL() string {
 	host := strings.TrimSpace(c.PublicHostname)
 	if host == "" {
-		host = fmt.Sprintf("localhost:%d", c.Port)
+		port := c.Port
+		if c.HTTPSPort > 0 {
+			port = c.HTTPSPort
+		}
+		host = fmt.Sprintf("localhost:%d", port)
 	}
 	host = strings.TrimRight(host, "/")
 	if strings.HasPrefix(host, "http://") || strings.HasPrefix(host, "https://") {
 		return host
+	}
+	if c.HTTPSPort > 0 {
+		return "https://" + host
 	}
 	if isLoopbackHost(host) {
 		return "http://" + host
@@ -120,6 +172,25 @@ func getEnvInt(key string, defaultValue int) int {
 		}
 	}
 	return defaultValue
+}
+
+func getEnvList(key string, defaultValue []string) []string {
+	if value := os.Getenv(key); value != "" {
+		return strings.Split(value, ",")
+	}
+	return defaultValue
+}
+
+func compactStrings(values []string) []string {
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		result = append(result, value)
+	}
+	return result
 }
 
 func getEnvDuration(key string, defaultValue time.Duration) time.Duration {

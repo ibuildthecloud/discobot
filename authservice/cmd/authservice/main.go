@@ -12,6 +12,7 @@ import (
 	"github.com/obot-platform/discobot/authservice/internal/handler"
 	"github.com/obot-platform/discobot/authservice/internal/service"
 	"github.com/obot-platform/discobot/authservice/internal/store"
+	"github.com/obot-platform/discobot/authservice/internal/tlsconfig"
 )
 
 func main() {
@@ -34,13 +35,52 @@ func main() {
 		log.Fatalf("failed to migrate database: %v", err)
 	}
 	st := store.New(db.DB, db.ReadDB)
+	httpsSetup, err := tlsconfig.Load(cfg, st)
+	if err != nil {
+		log.Fatalf("failed to initialize HTTPS configuration: %v", err)
+	}
 	svc := service.New(st, cfg)
 	h := handler.New(cfg, svc)
+	router := h.Router()
 	addr := ":" + httpPort(cfg.Port)
 	log.Printf("discobot auth service listening on %s", addr)
 	log.Printf("public issuer: %s", cfg.PublicBaseURL())
-	if err := http.ListenAndServe(addr, h.Router()); err != nil {
-		log.Fatalf("server error: %v", err)
+
+	if httpsSetup == nil {
+		if err := http.ListenAndServe(addr, router); err != nil {
+			log.Fatalf("server error: %v", err)
+		}
+		return
+	}
+
+	httpHandler := http.Handler(router)
+	if httpsSetup.RedirectHTTP {
+		httpHandler = tlsconfig.RedirectHTTPToHTTPS(cfg, httpHandler)
+	}
+	if httpsSetup.WrapHTTPHandler != nil {
+		httpHandler = httpsSetup.WrapHTTPHandler(httpHandler)
+	}
+
+	httpSrv := &http.Server{
+		Addr:    addr,
+		Handler: httpHandler,
+	}
+	httpsAddr := ":" + httpPort(cfg.HTTPSPort)
+	httpsSrv := &http.Server{
+		Addr:      httpsAddr,
+		Handler:   router,
+		TLSConfig: httpsSetup.TLSConfig,
+	}
+
+	go func() {
+		if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("HTTP server error: %v", err)
+		}
+	}()
+
+	log.Printf("HTTPS server starting on %s (%s TLS)", httpsAddr, httpsSetup.Mode)
+	if err := httpsSrv.ListenAndServeTLS("", ""); err != nil && err != http.ErrServerClosed {
+		log.Fatalf("HTTPS server error: %v", err)
 	}
 }
 
