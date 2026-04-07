@@ -88,6 +88,7 @@ ENV container=docker
 # pnpm is needed for package management
 # docker.io provides dockerd daemon and docker CLI (runs inside container with privileged mode)
 # docker-buildx is needed for multi-arch builds and advanced build features
+# docker-compose-v2 provides the Docker Compose v2 CLI plugin
 # iptables is needed by dockerd for network management
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
     && sed -i 's|http://|https://|g' /etc/apt/sources.list.d/ubuntu.sources \
@@ -96,6 +97,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
     curl \
     dbus \
     docker-buildx \
+    docker-compose-v2 \
     docker.io \
     git \
     iptables \
