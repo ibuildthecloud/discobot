@@ -9,7 +9,12 @@
 	import Trash2Icon from "@lucide/svelte/icons/trash-2";
 	import XIcon from "@lucide/svelte/icons/x";
 	import type { CredentialAuthType, CredentialEnvVar } from "$lib/api-types";
+	import {
+		parseBulkEnvVarPaste,
+		type BulkEnvVarPaste,
+	} from "$lib/components/app/credentials-manager-env-vars";
 	import { Button } from "$lib/components/ui/button";
+	import * as Dialog from "$lib/components/ui/dialog";
 	import { Input } from "$lib/components/ui/input";
 	import {
 		Item,
@@ -32,6 +37,14 @@
 		value: string;
 		hasStoredValue: boolean;
 		replaceValue: boolean;
+		valueFocused: boolean;
+	};
+
+	type PendingBulkEnvVarPaste = {
+		field: "key" | "value";
+		originalText: string;
+		rowId: string;
+		entries: BulkEnvVarPaste[];
 	};
 
 	const CUSTOM_PROVIDER = "__custom__";
@@ -64,6 +77,7 @@
 	let replaceSecretDraft = $state(false);
 	let agentVisibleDraft = $state(false);
 	let envVarRows = $state<EnvVarRow[]>([]);
+	let pendingBulkEnvVarPaste = $state<PendingBulkEnvVarPaste | null>(null);
 	let submitting = $state(false);
 	let deletingId = $state<string | null>(null);
 	let oauthPollTimer: ReturnType<typeof setTimeout> | null = null;
@@ -152,7 +166,80 @@
 			value,
 			hasStoredValue,
 			replaceValue,
+			valueFocused: false,
 		};
+	}
+
+	function applyBulkEnvVarPaste(rowId: string, entries: BulkEnvVarPaste[]) {
+		const rowIndex = envVarRows.findIndex((row) => row.id === rowId);
+		if (rowIndex === -1) {
+			return;
+		}
+		const replacementRows = entries.map((entry) =>
+			makeEnvVarRow(entry.key, entry.value, false, true),
+		);
+		envVarRows = [
+			...envVarRows.slice(0, rowIndex),
+			...replacementRows,
+			...envVarRows.slice(rowIndex + 1),
+		];
+	}
+
+	function insertTextAtCursor(input: HTMLInputElement, text: string) {
+		const start = input.selectionStart ?? input.value.length;
+		const end = input.selectionEnd ?? input.value.length;
+		const nextValue = `${input.value.slice(0, start)}${text}${input.value.slice(end)}`;
+		input.value = nextValue;
+		input.setSelectionRange(start + text.length, start + text.length);
+		input.dispatchEvent(new Event("input", { bubbles: true }));
+	}
+
+	function handleEnvVarPaste(
+		rowId: string,
+		field: "key" | "value",
+		event: ClipboardEvent,
+	) {
+		const text = event.clipboardData?.getData("text") ?? "";
+		const entries = parseBulkEnvVarPaste(text);
+		if (entries.length === 0) {
+			return;
+		}
+		event.preventDefault();
+		pendingBulkEnvVarPaste = {
+			field,
+			originalText: text,
+			rowId,
+			entries,
+		};
+	}
+
+	function confirmBulkEnvVarPaste() {
+		if (!pendingBulkEnvVarPaste) {
+			return;
+		}
+		applyBulkEnvVarPaste(
+			pendingBulkEnvVarPaste.rowId,
+			pendingBulkEnvVarPaste.entries,
+		);
+		pendingBulkEnvVarPaste = null;
+	}
+
+	function pasteOriginalBulkEnvVarContent() {
+		if (!pendingBulkEnvVarPaste) {
+			return;
+		}
+		const { field, originalText, rowId } = pendingBulkEnvVarPaste;
+		pendingBulkEnvVarPaste = null;
+		queueMicrotask(() => {
+			const input = document.querySelector<HTMLInputElement>(
+				`[data-env-var-row-id="${rowId}"][data-env-var-field="${field}"]`,
+			);
+			if (!input) {
+				return;
+			}
+			input.focus();
+			insertTextAtCursor(input, originalText);
+		});
 	}
 
 	function resetEditor() {
@@ -188,6 +275,7 @@
 		replaceSecretDraft = false;
 		agentVisibleDraft = false;
 		envVarRows = [makeEnvVarRow()];
+		pendingBulkEnvVarPaste = null;
 		submitting = false;
 	}
 
@@ -485,11 +573,19 @@
 	}
 
 	function showEnvVarValueInput(rowId: string) {
-		updateEnvVarRow(rowId, { replaceValue: true, value: "" });
+		updateEnvVarRow(rowId, {
+			replaceValue: true,
+			value: "",
+			valueFocused: false,
+		});
 	}
 
 	function hideEnvVarValueInput(rowId: string) {
-		updateEnvVarRow(rowId, { replaceValue: false, value: "" });
+		updateEnvVarRow(rowId, {
+			replaceValue: false,
+			value: "",
+			valueFocused: false,
+		});
 	}
 
 	function removeEnvVarRow(rowId: string) {
@@ -743,10 +839,13 @@
 										value={row.key}
 										placeholder="KEY"
 										class="min-w-0 font-mono"
+										data-env-var-row-id={row.id}
+										data-env-var-field="key"
 										oninput={(event) =>
 											updateEnvVarRow(row.id, {
 												key: (event.currentTarget as HTMLInputElement).value,
 											})}
+										onpaste={(event) => handleEnvVarPaste(row.id, "key", event)}
 									/>
 									<div class="min-w-0 space-y-1">
 										{#if row.hasStoredValue && !row.replaceValue}
@@ -763,17 +862,25 @@
 											</Button>
 										{:else}
 											<Input
-												type="password"
+												type={row.valueFocused ? "text" : "password"}
 												value={row.value}
 												placeholder={row.hasStoredValue
 													? "Enter a new value"
 													: "value"}
 												class="font-mono"
+												data-env-var-row-id={row.id}
+												data-env-var-field="value"
+												onfocus={() =>
+													updateEnvVarRow(row.id, { valueFocused: true })}
+												onblur={() =>
+													updateEnvVarRow(row.id, { valueFocused: false })}
 												oninput={(event) =>
 													updateEnvVarRow(row.id, {
 														value: (event.currentTarget as HTMLInputElement)
 															.value,
 													})}
+												onpaste={(event) =>
+													handleEnvVarPaste(row.id, "value", event)}
 											/>
 											<p class="text-sm text-muted-foreground">
 												{row.hasStoredValue
@@ -1157,5 +1264,57 @@
 				{/if}
 			</div>
 		{/if}
+
+		<Dialog.Root
+			open={pendingBulkEnvVarPaste !== null}
+			onOpenChange={(open) => {
+				if (!open) {
+					pendingBulkEnvVarPaste = null;
+				}
+			}}
+		>
+			<Dialog.Content class="sm:max-w-lg">
+				<Dialog.Header>
+					<Dialog.Title
+						>Create environment variables from pasted text?</Dialog.Title
+					>
+					<Dialog.Description>
+						Detected {pendingBulkEnvVarPaste?.entries.length ?? 0} newline-separated
+						assignments. You can create those environment variables now, or paste
+						the original text into the field instead.
+					</Dialog.Description>
+				</Dialog.Header>
+				{#if pendingBulkEnvVarPaste}
+					<div class="min-w-0 space-y-3">
+						<div
+							class="min-w-0 max-w-full overflow-x-auto rounded-md border border-border bg-muted/40 p-3"
+						>
+							<div class="mb-2 text-sm font-medium">Summary</div>
+							<ul class="w-max min-w-full space-y-1 text-sm">
+								{#each pendingBulkEnvVarPaste.entries as entry}
+									<li class="font-mono">{entry.key}={entry.value}</li>
+								{/each}
+							</ul>
+						</div>
+						<p class="text-sm text-muted-foreground">
+							Leading <code class="font-mono">export</code> prefixes were trimmed
+							and quoted values were unwrapped.
+						</p>
+					</div>
+				{/if}
+				<Dialog.Footer>
+					<Button
+						variant="ghost"
+						size="sm"
+						onclick={pasteOriginalBulkEnvVarContent}
+					>
+						Paste original text
+					</Button>
+					<Button variant="default" size="sm" onclick={confirmBulkEnvVarPaste}>
+						Create all env vars
+					</Button>
+				</Dialog.Footer>
+			</Dialog.Content>
+		</Dialog.Root>
 	</Tooltip.Provider>
 </div>
