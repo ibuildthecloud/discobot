@@ -408,7 +408,6 @@ func (p *UserPreference) BeforeCreate(_ *gorm.DB) error {
 	return nil
 }
 
-<<<<<<< HEAD
 // TLSCacheEntry stores encrypted TLS state blobs, such as ACME/autocert cache data.
 type TLSCacheEntry struct {
 	ID            string    `gorm:"primaryKey;type:text" json:"id"`
@@ -423,7 +422,10 @@ func (TLSCacheEntry) TableName() string { return "tls_cache_entries" }
 func (e *TLSCacheEntry) BeforeCreate(_ *gorm.DB) error {
 	if e.ID == "" {
 		e.ID = uuid.New().String()
-=======
+	}
+	return nil
+}
+
 // OIDCClientRegistration stores a dynamically registered OIDC client for a
 // specific issuer and Discobot public base URL.
 type OIDCClientRegistration struct {
@@ -464,7 +466,6 @@ func (Installation) TableName() string { return "installations" }
 func (i *Installation) BeforeCreate(_ *gorm.DB) error {
 	if i.ID == "" {
 		i.ID = uuid.New().String()
->>>>>>> 79c521c3 (Add OIDC login to Discobot)
 	}
 	return nil
 }
@@ -488,11 +489,8 @@ func AllModels() []interface{} {
 		&Job{},
 		&DispatcherLeader{},
 		&UserPreference{},
-<<<<<<< HEAD
 		&TLSCacheEntry{},
-=======
 		&OIDCClientRegistration{},
 		&Installation{},
->>>>>>> 79c521c3 (Add OIDC login to Discobot)
 	}
 }
