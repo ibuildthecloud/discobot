@@ -115,6 +115,20 @@ func TestReadBeforeWrite_WriteUpdatesRecord(t *testing.T) {
 	}
 }
 
+func TestWrite_RejectsNullByteContent(t *testing.T) {
+	e := New(t.TempDir(), t.TempDir(), t.Name())
+	out, ok := runTool(t, e, "Write", map[string]any{
+		"file_path": "null.txt",
+		"content":   "hello\u0000world",
+	})
+	if ok {
+		t.Fatal("expected null-byte write to fail")
+	}
+	if !strings.Contains(out, "null byte") {
+		t.Fatalf("expected null-byte error, got: %q", out)
+	}
+}
+
 // --- Edit guard tests ---
 
 func TestReadBeforeWrite_ExistingFileWithoutRead_Edit(t *testing.T) {
@@ -207,5 +221,47 @@ func TestReadBeforeWrite_EditUpdatesRecord(t *testing.T) {
 	data, _ := os.ReadFile(filepath.Join(cwd, "file.txt"))
 	if string(data) != "A B c\n" {
 		t.Errorf("unexpected file content: %q", string(data))
+	}
+}
+
+func TestEdit_RejectsBinarySourceFile(t *testing.T) {
+	cwd := t.TempDir()
+	filePath := filepath.Join(cwd, "file.bin")
+	if err := os.WriteFile(filePath, []byte("hello\x00world"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	e := New(cwd, t.TempDir(), t.Name())
+	primeRead(t, e, "file.bin")
+	out, ok := runEdit(t, e, map[string]any{
+		"file_path":  "file.bin",
+		"old_string": "hello",
+		"new_string": "goodbye",
+	})
+	if ok {
+		t.Fatal("expected binary source edit to fail")
+	}
+	if !strings.Contains(out, "null byte") {
+		t.Fatalf("expected null-byte error, got: %q", out)
+	}
+}
+
+func TestEdit_RejectsNullByteReplacement(t *testing.T) {
+	cwd := t.TempDir()
+	filePath := filepath.Join(cwd, "file.txt")
+	if err := os.WriteFile(filePath, []byte("hello world\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	e := New(cwd, t.TempDir(), t.Name())
+	primeRead(t, e, "file.txt")
+	out, ok := runEdit(t, e, map[string]any{
+		"file_path":  "file.txt",
+		"old_string": "world",
+		"new_string": "Go\u0000",
+	})
+	if ok {
+		t.Fatal("expected null-byte replacement to fail")
+	}
+	if !strings.Contains(out, "null byte") {
+		t.Fatalf("expected null-byte error, got: %q", out)
 	}
 }

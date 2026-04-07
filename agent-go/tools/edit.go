@@ -43,6 +43,12 @@ func (e *Executor) executeEdit(call message.ToolCallPart) (thread.ToolExecuteRes
 	if err := e.checkWriteAllowed(path, input.FilePath); err != nil {
 		return errResult(call, err.Error()), nil
 	}
+	if err := validateToolReadableTextFile(data, input.FilePath); err != nil {
+		return errResult(call, err.Error()), nil
+	}
+	if err := validateToolWriteTextContent(input.NewString, input.FilePath); err != nil {
+		return errResult(call, err.Error()), nil
+	}
 
 	content := string(data)
 
@@ -64,6 +70,9 @@ func (e *Executor) executeEdit(call message.ToolCallPart) (thread.ToolExecuteRes
 		newContent = strings.ReplaceAll(content, input.OldString, input.NewString)
 	} else {
 		newContent = strings.Replace(content, input.OldString, input.NewString, 1)
+	}
+	if err := validateToolWriteTextContent(newContent, input.FilePath); err != nil {
+		return errResult(call, err.Error()), nil
 	}
 
 	// Ensure parent directory exists (in case old_string created empty file scenario).

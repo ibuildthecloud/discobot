@@ -1,9 +1,12 @@
 package tools
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/obot-platform/discobot/agent-go/message"
 	"github.com/obot-platform/discobot/agent-go/thread"
@@ -28,6 +31,9 @@ func (e *Executor) executeWrite(call message.ToolCallPart) (thread.ToolExecuteRe
 	if err := e.checkWriteAllowed(path, input.FilePath); err != nil {
 		return errResult(call, err.Error()), nil
 	}
+	if err := validateToolWriteTextContent(input.Content, input.FilePath); err != nil {
+		return errResult(call, err.Error()), nil
+	}
 
 	// Ensure parent directory exists.
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -40,4 +46,24 @@ func (e *Executor) executeWrite(call message.ToolCallPart) (thread.ToolExecuteRe
 
 	e.recordFileWritten(path)
 	return textResult(call, fmt.Sprintf("Successfully wrote to %s", input.FilePath)), nil
+}
+
+func validateToolReadableTextFile(data []byte, displayPath string) error {
+	if !utf8.Valid(data) {
+		return fmt.Errorf("%s contains invalid UTF-8 and cannot be edited as text", displayPath)
+	}
+	if bytes.IndexByte(data, 0) >= 0 {
+		return fmt.Errorf("%s contains a null byte and cannot be edited as text", displayPath)
+	}
+	return nil
+}
+
+func validateToolWriteTextContent(content string, displayPath string) error {
+	if !utf8.ValidString(content) {
+		return fmt.Errorf("%s content must be valid UTF-8", displayPath)
+	}
+	if strings.IndexByte(content, 0) >= 0 {
+		return fmt.Errorf("%s content contains a null byte; binary content is not allowed", displayPath)
+	}
+	return nil
 }

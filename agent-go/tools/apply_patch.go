@@ -141,6 +141,9 @@ func (e *Executor) applyPatchOperations(ops []patchOperation) (*patchAffectedPat
 			if len(op.addLines) > 0 {
 				content = strings.Join(op.addLines, "\n") + "\n"
 			}
+			if err := validateToolWriteTextContent(content, op.path); err != nil {
+				return nil, err
+			}
 			if err := os.WriteFile(srcPath, []byte(content), 0o644); err != nil {
 				return nil, fmt.Errorf("failed to write file: %v", err)
 			}
@@ -166,9 +169,15 @@ func (e *Executor) applyPatchOperations(ops []patchOperation) (*patchAffectedPat
 			if err != nil {
 				return nil, fmt.Errorf("failed to read file to update %s: %v", op.path, err)
 			}
+			if err := validateToolReadableTextFile(data, op.path); err != nil {
+				return nil, err
+			}
 
 			newContent, err := applyUpdateChunks(data, op.path, op.chunks)
 			if err != nil {
+				return nil, err
+			}
+			if err := validateToolWriteTextContent(newContent, op.path); err != nil {
 				return nil, err
 			}
 

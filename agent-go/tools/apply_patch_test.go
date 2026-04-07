@@ -161,6 +161,21 @@ func TestApplyPatch_AddFile(t *testing.T) {
 	}
 }
 
+func TestApplyPatch_RejectsNullByteAddFile(t *testing.T) {
+	cwd := t.TempDir()
+	e := New(cwd, t.TempDir(), t.Name())
+
+	patch := "*** Begin Patch\n*** Add File: added.txt\n+hello\u0000world\n*** End Patch"
+
+	out, ok := runApplyPatch(t, e, patch)
+	if ok {
+		t.Fatal("expected null-byte add file patch to fail")
+	}
+	if !strings.Contains(out, "null byte") {
+		t.Fatalf("expected null-byte error, got: %q", out)
+	}
+}
+
 func TestApplyPatch_AddFileCanOverwriteExistingWithRead(t *testing.T) {
 	cwd := t.TempDir()
 	path := filepath.Join(cwd, "added.txt")
@@ -343,6 +358,32 @@ func TestApplyPatch_ContextNotFound(t *testing.T) {
 	}
 	if !strings.Contains(out, "failed to find expected lines") {
 		t.Fatalf("unexpected output: %q", out)
+	}
+}
+
+func TestApplyPatch_RejectsBinarySourceFile(t *testing.T) {
+	cwd := t.TempDir()
+	path := filepath.Join(cwd, "file.bin")
+	if err := os.WriteFile(path, []byte("hello\x00world"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	e := New(cwd, t.TempDir(), t.Name())
+	primeRead(t, e, "file.bin")
+
+	patch := `*** Begin Patch
+*** Update File: file.bin
+@@
+-hello	world
++goodbye
+*** End Patch`
+
+	out, ok := runApplyPatch(t, e, patch)
+	if ok {
+		t.Fatal("expected binary source patch to fail")
+	}
+	if !strings.Contains(out, "null byte") {
+		t.Fatalf("expected null-byte error, got: %q", out)
 	}
 }
 
