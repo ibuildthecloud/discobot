@@ -60,6 +60,40 @@ func TestWebSearch_UsesDefaultDiscobotProxyURLWhenTokenSet(t *testing.T) {
 	}
 }
 
+func TestWebSearch_UsesDiscobotProxyFromHiddenCredential(t *testing.T) {
+	calledProxy := false
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calledProxy = true
+		if got := r.Header.Get("X-Discobot-Id"); got != "hidden-discobot-token" {
+			t.Fatalf("expected hidden X-Discobot-Id header, got %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"results":[{"title":"Hidden","url":"https://example.com/hidden","content":"used hidden credential"}]}`))
+	}))
+	defer proxy.Close()
+	t.Setenv("DISCOBOT_SERVICES_URL", proxy.URL)
+
+	e := New(t.TempDir(), t.TempDir(), t.Name())
+	e.SetEnvLookup(func(key string) string {
+		if key == "DISCOBOT_TOKEN" {
+			return "hidden-discobot-token"
+		}
+		return ""
+	})
+	out := runWebSearch(t, e, map[string]any{"query": "golang"})
+
+	if !calledProxy {
+		t.Fatal("expected Discobot proxy endpoint to be called")
+	}
+	textOut, ok := out.(message.TextOutput)
+	if !ok {
+		t.Fatalf("expected TextOutput, got %T", out)
+	}
+	if !strings.Contains(textOut.Value, "used hidden credential") {
+		t.Fatalf("expected hidden credential content in output, got %q", textOut.Value)
+	}
+}
+
 func TestWebSearch_UsesDiscobotProxyWhenTokenSet(t *testing.T) {
 	t.Setenv("DISCOBOT_TOKEN", "discobot-token")
 	t.Setenv("TAVILY_API_KEY", "should-not-be-used")

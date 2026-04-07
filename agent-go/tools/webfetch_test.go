@@ -112,6 +112,52 @@ func TestWebFetch_UsesTavilyWhenApiKeySet(t *testing.T) {
 	}
 }
 
+func TestWebFetch_UsesDiscobotProxyFromHiddenCredential(t *testing.T) {
+	calledProxy := false
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calledProxy = true
+		if got := r.Header.Get("X-Discobot-Id"); got != "hidden-discobot-token" {
+			t.Fatalf("expected hidden X-Discobot-Id header, got %q", got)
+		}
+
+		var req tavilyExtractRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		if len(req.URLs) != 1 || req.URLs[0] != "https://example.com/hidden" {
+			t.Fatalf("unexpected urls payload: %+v", req.URLs)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"results":[{"url":"https://example.com/hidden","raw_content":"from hidden credential"}]}`))
+	}))
+	defer proxy.Close()
+	t.Setenv("DISCOBOT_SERVICES_URL", proxy.URL)
+
+	e := New(t.TempDir(), t.TempDir(), t.Name())
+	e.SetEnvLookup(func(key string) string {
+		if key == "DISCOBOT_TOKEN" {
+			return "hidden-discobot-token"
+		}
+		return ""
+	})
+	out := runWebFetch(t, e, map[string]string{
+		"url":    "https://example.com/hidden",
+		"prompt": "extract",
+	})
+
+	if !calledProxy {
+		t.Fatal("expected Discobot proxy endpoint to be called")
+	}
+	textOut, ok := out.(message.TextOutput)
+	if !ok {
+		t.Fatalf("expected TextOutput, got %T", out)
+	}
+	if !strings.Contains(textOut.Value, "from hidden credential") {
+		t.Fatalf("expected hidden credential content in output, got: %q", textOut.Value)
+	}
+}
+
 func TestWebFetch_UsesDiscobotProxyWhenTokenSet(t *testing.T) {
 	t.Setenv("DISCOBOT_TOKEN", "discobot-token")
 	t.Setenv("TAVILY_API_KEY", "test-key")

@@ -52,8 +52,10 @@ func Run(cfg *config.Config) {
 	exec := tools.New(cfg.AgentCwd, cfg.DataDir, "")
 	exec.SetThreadsDir(cfg.ThreadsDir)
 	exec.SetBashEnvAllowlist(cfg.BashEnvAllowlist)
+	// Internal tool lookups may use request-scoped credentials even when they are
+	// not agent-visible. Bash still receives only the visible snapshot below.
 	exec.SetEnvLookup(func(key string) string {
-		if cred := credMgr.VisibleGet(key); cred != nil {
+		if cred := credMgr.Get(key); cred != nil {
 			return cred.Value
 		}
 		return ""
