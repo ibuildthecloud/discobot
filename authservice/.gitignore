@@ -1,0 +1,8 @@
+# Air / local build artifacts
+build/
+
+# Local env file
+.env
+
+# SQLite files created from literal ~ paths during local testing
+~/
