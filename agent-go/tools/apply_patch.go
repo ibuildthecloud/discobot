@@ -161,7 +161,7 @@ func (e *Executor) applyPatchOperations(ops []patchOperation) (*patchAffectedPat
 			if err := e.checkWriteAllowed(srcPath, op.path); err != nil {
 				return nil, err
 			}
-			if err := os.Remove(srcPath); err != nil {
+			if err := os.Remove(srcPath); err != nil && !os.IsNotExist(err) {
 				return nil, fmt.Errorf("failed to delete file: %v", err)
 			}
 			e.removeFileRecord(srcPath)

@@ -279,6 +279,23 @@ func TestApplyPatch_DeleteFileStillRequiresRead(t *testing.T) {
 	}
 }
 
+func TestApplyPatch_DeleteMissingFileSucceeds(t *testing.T) {
+	cwd := t.TempDir()
+	e := New(cwd, t.TempDir(), t.Name())
+
+	patch := `*** Begin Patch
+*** Delete File: remove.txt
+*** End Patch`
+
+	out, ok := runApplyPatch(t, e, patch)
+	if !ok {
+		t.Fatalf("unexpected error: %s", out)
+	}
+	if !strings.Contains(out, "D remove.txt") {
+		t.Fatalf("expected delete summary, got: %q", out)
+	}
+}
+
 func TestApplyPatch_UpdateFileWithChunks(t *testing.T) {
 	cwd := t.TempDir()
 	path := filepath.Join(cwd, "file.txt")
