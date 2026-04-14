@@ -9,7 +9,7 @@ export default [
 			"out/**",
 			"node_modules/**",
 			"ui/**",
-			"server/**",
+			"server2/**",
 			"proxy/**",
 			"agent/**",
 			"src-tauri/**",
